@@ -1,1 +1,46 @@
-venv
+# --- OS / System Files ---
+.DS_Store
+Thumbs.db
+*.swp
+desktop.ini
+
+# --- Python / Backend ---
+**/venv/
+**/env/
+**/bin/
+**/lib/
+**/include/
+**/share/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.python-version
+
+# --- Node / Frontend (React/Vite) ---
+**/node_modules/
+**/dist/
+**/dist-ssr/
+*.local
+.eslintcache
+
+# --- Project Specific: Local Data ---
+# We ignore the entire data directory and its subfolders
+# so your local videos/frames never hit GitHub
+data/uploads/
+data/audio/
+data/transcriptions/
+data/index/
+data/clips/
+data/temp/
+
+# --- Environment Secrets ---
+.env
+.env.local
+.env.*.local
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
