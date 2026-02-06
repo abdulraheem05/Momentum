@@ -64,3 +64,20 @@ async def upload_video(file: UploadFile = File(...)):
         "saved_as": dest.name,
         "size_bytes": bytes_written
     }
+
+@app.post("/videos/{video_id}/extract-audio")
+def extract_audio(video_id: str):
+    video_path = find_video_path(video_id)
+
+    if not video_path:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    audio_out = AUDIO_DIR/f"{video_id}.wav"
+
+    try:
+        extract_audio_wav(video_path, audio_out)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail= str(e))
+    
+    return {"video_id":video_id, "audio_file":audio_out.name}
