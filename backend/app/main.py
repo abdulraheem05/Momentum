@@ -1,10 +1,15 @@
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, Query, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
-from app.core.paths import ensure_dir, UPLOADS_DIR
+from app.core.paths import ensure_dir, UPLOADS_DIR, AUDIO_DIR, CLIPS_DIR
+from app.services.video_store import find_video_path
+from app.services.ffmpeg_utils import extract_audio_wav, cut_clip
+from app.services.transcribe_fw import transcribe_audio
+from app.services.transcript_store import save_transcript, load_transcript, transcript_path
 
 app = FastAPI(title="Video Scene Finder")
 
