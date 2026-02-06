@@ -2,12 +2,20 @@
   max-width: 700px;
   margin: 40px auto;
   font-family: Arial, sans-serif;
+  /* Centering logic */
+  display: flex;
+  flex-direction: column;
+  align-items: center; 
+  text-align: center;
 }
 
 .upload-card {
-  padding: 16px;
+  width: 100%; /* Ensure it takes the full width of the 700px container */
+  padding: 24px;
   border: 1px solid #ddd;
-  borderRadius: 15px;
+  border-radius: 15px; /* Fixed the casing from borderRadius to border-radius */
+  background-color: #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05); /* Optional: adds a nice subtle lift */
 }
 
 .input-group {
@@ -60,6 +68,7 @@
 
 
 .result-box pre {
+  text-align: left;
   margin: 0;
   white-space: pre-wrap;
   word-wrap: break-word;
