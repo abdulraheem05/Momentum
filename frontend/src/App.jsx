@@ -47,7 +47,14 @@ export default function App() {
         <input
           type="file"
           accept="video/*"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={(e) => {
+            const selectedFile = e.target.files?.[0] || null;
+            setFile(selectedFile);
+            
+            setProgress(0);
+            setResult(null);
+            setError("");
+          }}
         />
 
         <div className="input-group">
