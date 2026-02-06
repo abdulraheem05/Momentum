@@ -81,9 +81,12 @@ export default function App() {
 
         {result && (
           <div className="result-box">
-            <pre>
-              {JSON.stringify(result, null, 2)}
-            </pre>
+            <h3>Upload Successful!</h3>
+            <div className="result-details">
+              <p><strong>Video ID:</strong> {result.video_id}</p>
+              <p><strong>Filename:</strong> {result.saved_as}</p>
+              <p><strong>Size:</strong> {(result.size_bytes / (1024 * 1024)).toFixed(2)} MB</p>
+            </div>
           </div>
         )}
       </div>
