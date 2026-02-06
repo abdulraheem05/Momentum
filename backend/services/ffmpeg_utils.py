@@ -19,3 +19,13 @@ def extract_audio_wav (video_path : Path, audio_out: Path) -> None:
         "-f", "wav"    
     ])
 
+def cut_clip(video_path: Path, trim_output_path: Path, start_sec: float, duration_sec: float = 10.0) -> None:
+    trim_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    run_ffmpeg([
+        "-ss", str(max(0.0, start_sec)),
+        "-i", str(video_path),
+        "-t", str(duration_sec),
+        "-c", "copy",
+        str(trim_output_path)
+    ])
