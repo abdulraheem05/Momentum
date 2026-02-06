@@ -81,3 +81,21 @@ def extract_audio(video_id: str):
         raise HTTPException(status_code=500, detail= str(e))
     
     return {"video_id":video_id, "audio_file":audio_out.name}
+
+@app.post("/videos/{video_id}/transcribe")
+def transcribe(video_id: str, language: str = Query(default="en", description="en or ta"), model_size: str = Query(default="small")):
+    video_path = find_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    audio_path = AUDIO_DIR / f"{video_id}.wav"
+    if not audio_path.exists():
+        raise HTTPException(status_code=400, detail="Audio not found. Run extract-audio first.")
+
+    try:
+        data = transcribe_audio(audio_path, language=language, model_size=model_size)
+        p = save_transcript(video_id, data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"video_id": video_id, "transcript_file": p.name, "segments": len(data.get("segments", [])), "detected_language": data.get("language")}
