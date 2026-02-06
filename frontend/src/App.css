@@ -7,7 +7,7 @@
 .upload-card {
   padding: 16px;
   border: 1px solid #ddd;
-  borderRadius: 10px;
+  borderRadius: 15px;
 }
 
 .input-group {
@@ -57,6 +57,7 @@
   padding: 12px;
   border-radius: 4px;
 }
+
 
 .result-box pre {
   margin: 0;
