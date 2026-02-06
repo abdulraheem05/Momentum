@@ -1,0 +1,21 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local Data (Don't upload your heavy video files!)
+data/uploads/
+data/audio/
+data/transcriptions/
+data/index/text
+data/index/frames
+data/clips
+
+
+
+# Environment variables (API keys)
+.env
