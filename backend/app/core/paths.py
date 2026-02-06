@@ -5,7 +5,7 @@ DATA_DIR = ROOT_DIR/"data"
 
 UPLOADS_DIR = DATA_DIR/"uploads"
 AUDIO_DIR = DATA_DIR/"audio"
-TRANSCRIPTIONS_DIR = DATA_DIR/"transcriptions"
+TRANSCRIPTS_DIR = DATA_DIR/"transcriptions"
 INDEX_TEXT_DIR = DATA_DIR/"index"/"text"
 INDEX_FRAMES_DIR = DATA_DIR/"index"/"frames"
 CLIPS_DIR = DATA_DIR/"clips"
@@ -15,7 +15,7 @@ def ensure_dir() -> None:
         DATA_DIR,
         UPLOADS_DIR,
         AUDIO_DIR,
-        TRANSCRIPTIONS_DIR,
+        TRANSCRIPTS_DIR,
         INDEX_TEXT_DIR,
         INDEX_FRAMES_DIR,
         CLIPS_DIR
