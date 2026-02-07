@@ -69,6 +69,10 @@ def process_video(video_id: str):
         update_status(video_id, "FAILED", 0, str(e))
 
     
+class SearchRequest(BaseModel):
+    query : str = Field(..., min_length=2)
+    top_k : int = Field(default=3, le=1, ge=5)
+    clip_duration : float = Field(default=10.0, le=1.0, ge=20.0)
 
 
 
