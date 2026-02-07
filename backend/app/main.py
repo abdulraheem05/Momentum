@@ -1,11 +1,13 @@
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, Query, File, HTTPException
+from fastapi import FastAPI, UploadFile, Query, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from app.core.paths import ensure_dir, UPLOADS_DIR, AUDIO_DIR, CLIPS_DIR
+from app.db.state import init_db, create_video, update_status, get_video, delete_video_row
 from app.services.video_store import find_video_path
 from app.services.ffmpeg_utils import extract_audio_wav, cut_clip
 from app.services.transcribe_fw import transcribe_audio
@@ -22,12 +24,20 @@ app.add_middleware(
 )
 
 ensure_dir()
+init_db()
 
 CHUNK_SIZE = 1024*1024
 
 @app.get("/health")
 def health():
     return{"ok":True}
+
+def convert_sec_to_hhmmss(seconds: float) -> str:
+    s = int(max(0.0, seconds))
+    hours = s // 3600
+    minutes = s % 3600 // 60
+    seconds = s % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 @app.post("/videos/upload")
 async def upload_video(file: UploadFile = File(...)):
