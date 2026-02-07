@@ -39,6 +39,9 @@ def convert_sec_to_hhmmss(seconds: float) -> str:
     seconds = s % 60
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+def _normalize(input: str) -> str:
+    return " ".join(input.lower().strip().split())
+
 @app.post("/videos/upload")
 async def upload_video(file: UploadFile = File(...)):
     if not file.filename:
