@@ -30,3 +30,16 @@ def _init() -> None:
     con.commit()
     con.close()
 
+def create_video(video_id: str, language: str, model_size: str) -> None:
+    con = _connect()
+    cur = con.cursor()
+
+    cur.execute("""
+    INSERT INTO videos (video_id, language, model_size, stage, progress, error)
+    VALUES (?, ?, ?, ?, ?, NULL);
+    """, (video_id, language, model_size, "UPLOADED", 0))
+
+    con.commit()
+    con.close()
+
+
