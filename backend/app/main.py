@@ -71,13 +71,13 @@ def process_video(video_id: str):
     
 class SearchRequest(BaseModel):
     query : str = Field(..., min_length=2)
-    top_k : int = Field(default=3, le=1, ge=5)
-    clip_duration : float = Field(default=10.0, le=1.0, ge=20.0)
+    top_k : int = Field(default=3, ge=1, le=5)
+    clip_duration : float = Field(default=10.0, ge=1.0, le=20.0)
 
 @app.post("/videos")
 async def create_new_video(
         background_tasks : BackgroundTasks,
-        file : File = (...),
+        file : UploadFile = File (...),
         language : str = "en",
         model_size : str = "small"
 ) : 
@@ -144,14 +144,14 @@ def search(video_id: str, body: SearchRequest):
 
     for s in segments:
         text = _normalize(s["text"])
-        score = (1 for w in q_words if w in text)
+        score = sum(1 for w in q_words if w in text)
         if query in text:
             score += 3
         if score > 0:
-            score.append((score, s))
+            scored.append((score, s))
 
     
-    score.sort(key = lambda x : x[0], reverse = True)
+    scored.sort(key = lambda x : x[0], reverse = True)
 
     results = []
     for score, seg in scored[:body.top_k]:
@@ -175,7 +175,7 @@ def search(video_id: str, body: SearchRequest):
         "alternates": alternates
     }
     
-@app.get("/vidoes/{video_id}/clip")
+@app.get("/videos/{video_id}/clip")
 def clip(video_id: str, start: float, duration: float = 10.0):
     video_path = find_video_path(video_id)
     if not video_path:
@@ -184,7 +184,7 @@ def clip(video_id: str, start: float, duration: float = 10.0):
     out_path = CLIPS_DIR/ video_id /f"{int(start)}_{int(duration)}.mp4"
 
     if not out_path.exists():
-        cut_clip(video_id, out_path, start, duration)
+        cut_clip(video_path, out_path, start, duration)
 
     return FileResponse(str(out_path), media_type="video/mp4")
 
