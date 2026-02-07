@@ -53,7 +53,23 @@ def process_video(video_id: str):
         language = row["language"]
         model_size = row["model_size"]
 
-        
+        update_status(video_id, "EXTRACTING", 10)
+        audio_path = AUDIO_DIR/f"{video_id}.wav"
+        extract_audio_wav(video_path, audio_path)
+
+        update_status(video_id, "TRANSCRIBING", 40)
+        transcript = transcribe_audio(audio_path, language, model_size)
+
+        update_status(video_id, "SAVED TRANSCRIPT", 85)
+        save_transcript(video_id, transcript)
+
+        update_status(video_id, "READY", 100)
+
+    except Exception as e:
+        update_status(video_id, "FAILED", 0, str(e))
+
+    
+
 
 
 
