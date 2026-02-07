@@ -84,8 +84,28 @@ async def create_new_video(
         raise HTTPException(status_code=400, detail="Language must be en or ta")
     
     video_id = str(uuid.uuid4())
+    ext = Path(file.filename).suffix.lower() or ".mp4"
+    dest = UPLOADS_DIR/f"{video_id}{ext}"
+
+    try:
+        with open (dest, "wb") as out:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                out.write(chunk)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File uplload failed: {e}")
     
 
+    create_video(video_id, language, model_size)
+    background_tasks.add_task(process_video, video_id)
+
+    return {
+        "video_id": video_id,
+        "message": "Uploaded successfully. We are processing your video..."
+    }
 
 
 
