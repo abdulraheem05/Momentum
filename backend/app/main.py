@@ -74,6 +74,7 @@ class SearchRequest(BaseModel):
     top_k : int = Field(default=3, le=1, ge=5)
     clip_duration : float = Field(default=10.0, le=1.0, ge=20.0)
 
+@app.post("/videos")
 async def create_new_video(
         background_tasks : BackgroundTasks,
         file : File = (...),
@@ -108,6 +109,24 @@ async def create_new_video(
     }
 
 
+@app.get("/videos/{video_id}/status")
+def status(video_id: str):
+    row = get_video(video_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    return {
+        "video_id": video_id,
+        "stage": row["stage"],
+        "progress": row["progress"],
+        "ready_to_search": row["stage"] == "READY",
+        "error": row["error"]
+    }
+
+
+@app.post("/videos/{video_id}/search")
+def search(video_id: str, body: SearchRequest):
+    
 
 
 
