@@ -43,3 +43,32 @@ def create_video(video_id: str, language: str, model_size: str) -> None:
     con.close()
 
 
+def update_status(video_id: str, stage: str, progress: int, error: Optional[str] = None) -> None:
+    con = _connect()
+    cur = con.cursor()
+
+    cur.execute("""
+    UPDATE videos
+    SET stage = ?, progress = ?, error = ?
+    WHERE video_id = ?;
+    """, (stage, progress, error, video_id))
+
+    con.commit()
+    con.close()
+
+def get_video(video_id: str) -> Optional[dict]:
+    con = _connect()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM videos WHERE video_id = ?;", (video_id,))
+    row = cur.fetchone()
+    con.close()
+
+    return dict(row) if row else None
+
+def delete_video_row(video_id: str) -> None:
+    con = _connect()
+    cur = con.cursor()
+    cur.execute("DELETE FROM videos WHERE video_id = ?;", (video_id,))
+    con.commit()
+    con.close()
