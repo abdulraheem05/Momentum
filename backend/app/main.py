@@ -126,6 +126,13 @@ def status(video_id: str):
 
 @app.post("/videos/{video_id}/search")
 def search(video_id: str, body: SearchRequest):
+    row = get_video(video_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    if row["stage"] != "READY":
+        raise HTTPException(status_code=409, detail=f"Video not ready yet. Status: {row['stage']}")
+    
     
 
 
