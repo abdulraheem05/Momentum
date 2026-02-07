@@ -28,10 +28,6 @@ init_db()
 
 CHUNK_SIZE = 1024*1024
 
-@app.get("/health")
-def health():
-    return{"ok":True}
-
 def convert_sec_to_hhmmss(seconds: float) -> str:
     s = int(max(0.0, seconds))
     hours = s // 3600
@@ -41,6 +37,51 @@ def convert_sec_to_hhmmss(seconds: float) -> str:
 
 def _normalize(input: str) -> str:
     return " ".join(input.lower().strip().split())
+
+
+def process_video(video_id: str):
+
+    try:
+        row = get_video(video_id)
+        if not row:
+            return
+        
+        video_path = find_video_path(video_id)
+        if not video_path:
+            update_status(video_id, "FAILED", 0, "Video not found")
+
+        language = row["language"]
+        model_size = row["model_size"]
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@app.get("/health")
+def health():
+    return{"ok":True}
+
 
 @app.post("/videos/upload")
 async def upload_video(file: UploadFile = File(...)):
