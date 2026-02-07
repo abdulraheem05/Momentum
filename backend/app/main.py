@@ -152,8 +152,30 @@ def search(video_id: str, body: SearchRequest):
 
     
     score.sort(key = lambda x : x[0], reverse = True)
+
+    results = []
+    for score, seg in scored[:body.top_k]:
+        start = seg["start"]
+        clip_url = f"/videos/{video_id}/clip?start={start}&dur={body.clip_duration}"
+
+        results.append({
+            "score": score,
+            "timestamp": convert_sec_to_hhmmss(start),
+            "start": start,
+            "text": seg["text"],
+            "clip_url": clip_url
+        })
+
+    best = results[0] if results else None
+    alternates = results[1:] if len(results) > 1 else []
+
+    return {
+        "video_id": video_id,
+        "best": best,
+        "alternates": alternates
+    }
     
-    
+
 
 
 
