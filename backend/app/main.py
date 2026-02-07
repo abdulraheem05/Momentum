@@ -133,8 +133,19 @@ def search(video_id: str, body: SearchRequest):
     if row["stage"] != "READY":
         raise HTTPException(status_code=409, detail=f"Video not ready yet. Status: {row['stage']}")
     
-    
 
+    data = load_transcript(video_id)
+    segments = data.get("segments", [])
+
+    query = _normalize(body.query)
+    q_words = query.split()
+
+    scored = []
+
+    for s in segments:
+        text = _normalize(s["text"])
+        
+    
 
 
 
