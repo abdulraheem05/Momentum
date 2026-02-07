@@ -2,7 +2,7 @@ from pathlib import Path
 from faster_whisper import WhisperModel
 
 def transcribe_audio(audio_path: Path, language: str | None, model_size: str = "small" ) -> dict :
-    model = WhisperModel(model_size, device="cuda", compute_type="int8")
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
     segments, info = model.transcribe(
         str(audio_path),

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.core.paths import ensure_dir, UPLOADS_DIR, AUDIO_DIR, CLIPS_DIR
-from app.db.state import init_db, create_video, update_status, get_video, delete_video_row
+from app.db.state import _init, create_video, update_status, get_video, delete_video_row
 from app.services.video_store import find_video_path
 from app.services.ffmpeg_utils import extract_audio_wav, cut_clip
 from app.services.transcribe_fw import transcribe_audio
@@ -24,7 +24,7 @@ app.add_middleware(
 )
 
 ensure_dir()
-init_db()
+_init()
 
 CHUNK_SIZE = 1024*1024
 

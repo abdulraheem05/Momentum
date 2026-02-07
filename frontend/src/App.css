@@ -1,46 +1,86 @@
 .container {
-  max-width: 700px;
+  max-width: 860px;
   margin: 40px auto;
   font-family: Arial, sans-serif;
-  /* Centering logic */
+  padding: 0 16px;
+}
+
+.title {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e7e7e7;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+
+.section {
+  padding: 14px 0;
+  border-top: 1px solid #f0f0f0;
+}
+
+.section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.sectionTitle {
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-align: left;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.field {
   display: flex;
   flex-direction: column;
-  align-items: center; 
-  text-align: center;
+  gap: 6px;
 }
 
-.upload-card {
-  width: 100%; /* Ensure it takes the full width of the 700px container */
-  padding: 24px;
+.field label {
+  font-size: 12px;
+  color: #666;
+}
+
+select {
+  padding: 10px 12px;
   border: 1px solid #ddd;
-  border-radius: 15px; /* Fixed the casing from borderRadius to border-radius */
-  background-color: #fff;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05); /* Optional: adds a nice subtle lift */
+  border-radius: 10px;
 }
 
-.input-group {
+.fileInput {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.hint {
+  margin: 10px 0 0;
+  color: #666;
+  font-size: 13px;
+  text-align: left;
+}
+
+.progressWrap {
   margin-top: 12px;
 }
 
-.upload-button {
-  padding: 10px 14px;
-  cursor: pointer;
-  background-color: #333;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  transition: background 0.2s;
+.progressText {
+  text-align: left;
+  font-size: 13px;
+  color: #333;
 }
 
-.upload-button:hover {
-  background-color: #555;
-}
-
-.progress-container {
-  margin-top: 12px;
-}
-
-.progress-bar-bg {
+.progressBarBg {
   height: 10px;
   background: #eee;
   border-radius: 999px;
@@ -48,28 +88,148 @@
   margin-top: 6px;
 }
 
-.progress-bar-fill {
+.progressBarFill {
   height: 100%;
   background: #333;
-  transition: width 0.3s ease-in-out;
+  transition: width 0.25s ease-in-out;
 }
 
-.error-message {
-  color: crimson;
+.metaBox {
   margin-top: 12px;
-}
-
-.result-box {
-  margin-top: 12px;
-  background: #f7f7f7;
-  padding: 12px;
-  border-radius: 4px;
-}
-
-
-.result-box pre {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 10px;
   text-align: left;
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  font-size: 14px;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  outline: none;
+  resize: vertical;
+}
+
+.primaryBtn {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 10px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryBtn {
+  padding: 12px 14px;
+  border: none;
+  border-radius: 10px;
+  background: #eee;
+  cursor: pointer;
+}
+
+.secondaryBtn:hover {
+  background: #e3e3e3;
+}
+
+.smallNote {
+  margin-top: 8px;
+  color: #777;
+  font-size: 13px;
+  text-align: left;
+}
+
+.resultCard {
+  border: 1px solid #eee;
+  background: #fafafa;
+  border-radius: 12px;
+  padding: 12px;
+  text-align: left;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.pill.muted {
+  background: #777;
+}
+
+.resultText {
+  color: #111;
+  line-height: 1.4;
+}
+
+.videoBox {
+  margin-top: 12px;
+}
+
+.video {
+  width: 100%;
+  max-width: 760px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+}
+
+.alts {
+  margin-top: 12px;
+  text-align: left;
+}
+
+.altsTitle {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.altItem {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px dashed #eee;
+}
+
+.altText {
+  color: #222;
+  font-size: 14px;
+}
+
+.empty {
+  color: #666;
+  text-align: left;
+}
+
+.status {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: #f3f7ff;
+  border: 1px solid #e1e9ff;
+  border-radius: 12px;
+  color: #1d2b55;
+  text-align: left;
+}
+
+.error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #fff1f1;
+  border: 1px solid #ffd0d0;
+  border-radius: 12px;
+  color: #8b1b1b;
+  text-align: left;
 }
