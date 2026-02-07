@@ -144,7 +144,15 @@ def search(video_id: str, body: SearchRequest):
 
     for s in segments:
         text = _normalize(s["text"])
-        
+        score = (1 for w in q_words if w in text)
+        if query in text:
+            score += 3
+        if score > 0:
+            score.append((score, s))
+
+    
+    score.sort(key = lambda x : x[0], reverse = True)
+    
     
 
 
