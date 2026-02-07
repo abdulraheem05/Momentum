@@ -175,7 +175,18 @@ def search(video_id: str, body: SearchRequest):
         "alternates": alternates
     }
     
+@app.get("/vidoes/{video_id}/clip")
+def clip(video_id: str, start: float, duration: float = 10.0):
+    video_path = find_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="video not found")
+    
+    out_path = CLIPS_DIR/ video_id /f"{int(start)}_{int(duration)}.mp4"
 
+    if not out_path.exists():
+        cut_clip(video_id, out_path, start, duration)
+
+    return FileResponse(str(out_path), media_type="video/mp4")
 
 
 
