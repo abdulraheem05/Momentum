@@ -47,3 +47,18 @@ def embed_images_batched(
         all_vectors.append(feat.detach().float().cpu().numpy())
 
     return np.vstack(all_vectors).astype("float32")
+
+@torch.inference_mode()
+def embed_text(text: str) -> np.ndarray:
+    """
+    Returns normalized text embedding [D] float32
+    """
+    model, processor, device = get_clip_model_and_processor()
+
+    inputs = processor(text=[text], return_tensors="pt", padding=True)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    feats = model.get_text_features(**inputs)
+    feats = feats / feats.norm(p=2, dim=-1, keepdim=True)
+
+    return feats[0].detach().float().cpu().numpy().astype("float32")
