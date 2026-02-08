@@ -6,7 +6,7 @@ DATA_DIR = ROOT_DIR/"data"
 UPLOADS_DIR = DATA_DIR/"uploads"
 AUDIO_DIR = DATA_DIR/"audio"
 TRANSCRIPTS_DIR = DATA_DIR/"transcriptions"
-INDEX_TEXT_DIR = DATA_DIR/"index"/"text"
+FRAMES_TMP_DIR = DATA_DIR/"frames_tmp"
 INDEX_FRAMES_DIR = DATA_DIR/"index"/"frames"
 CLIPS_DIR = DATA_DIR/"clips"
 
