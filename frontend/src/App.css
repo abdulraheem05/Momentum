@@ -233,3 +233,12 @@ select {
   color: #8b1b1b;
   text-align: left;
 }
+
+.mutedText {
+  color: #666;
+}
+
+
+select, .textarea, .fileInput {
+  font-family: inherit;
+}
