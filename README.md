@@ -1,144 +1,174 @@
-# Video Finder — Audio Search + Scene Search (FastAPI + React)
+🎬 Video Finder
+Audio Search + Scene Search (FastAPI • React • CLIP • FAISS • Whisper)
 
-This project helps you find a moment inside a video using two independent pipelines:
 
-1) **Audio Search (Dialogue Search)**
-   - Upload a video
-   - Extract audio
-   - Transcribe speech (English/Tamil)
-   - Search the transcript for a phrase the user remembers
-   - Return:
-     - best timestamp (hh:mm:ss)
-     - a 10-second clip around that time
 
-2) **Scene Search (Visual Search / Scene Description)**
-   - Upload a video
-   - Sample frames (default: 1 frame every 3 seconds)
-   - Compute CLIP embeddings for frames (GPU supported)
-   - Build a FAISS index for fast similarity search
-   - Search using a scene description prompt
-   - Return:
-     - best timestamp (hh:mm:ss)
-     - a 10-second clip around that time
 
-✅ Key design choice: **Audio and Scene are separate uploads/jobs**  
-So a scene-only user never waits for transcription, and an audio-only user never waits for frame indexing.
 
----
 
-## Tech Stack
 
-- **Backend:** FastAPI (Python)
-- **Frontend:** React + Vite
-- **Audio:** FFmpeg → WAV → faster-whisper (GPU optional)
-- **Scene:** Frame sampling → CLIP embeddings → FAISS index
-- **Storage:** Local filesystem + SQLite job status
 
----
 
-## How the pipelines work
 
-### A) Audio Search pipeline
-**Goal:** find timestamp based on dialogue the user remembers.
 
-Steps:
-1. Upload video as `job_id.mp4`
-2. FFmpeg extracts mono 16kHz WAV:
-   - `uploads/job_id.mp4` → `audio/job_id.wav`
-3. Transcribe WAV with faster-whisper into segments:
-   - Each segment includes:
-     - `start` time (seconds)
-     - `end` time
-     - text
-4. Search:
-   - normalize query + segment text
-   - score segments by word overlap + exact phrase bonus
-5. Best match is returned with:
-   - `timestamp` (hh:mm:ss)
-   - `clip_url` to fetch a 10s clip
 
-### B) Scene Search pipeline
-**Goal:** find timestamp based on a visual description prompt.
+Find the exact moment inside a video using dialogue memory or scene description.
 
-Steps:
-1. Upload video as `job_id.mp4`
-2. Sample frames every N seconds (default `3s`):
-   - frames saved temporarily or directly embedded
-3. Compute CLIP embeddings:
-   - image embeddings: `[N, 512]` float32 (normalized)
-4. Build FAISS IndexFlatIP:
-   - inner product on normalized vectors == cosine similarity
-5. Search:
-   - embed the text query using CLIP text encoder
-   - retrieve top-k nearest frame embeddings
-6. Best match returned with:
-   - `timestamp` (hh:mm:ss)
-   - `clip_url` to fetch a 10s clip
+🚀 Overview
 
----
+Video Finder is a full-stack AI-powered video search system that allows users to locate specific moments inside a video using:
 
-## Files/folders created at runtime (backend/data)
+🔊 1) Audio Search (Dialogue-Based Search)
 
-The backend writes runtime artifacts into `backend/data/` (ignored by Git).
+Upload a video
 
-Typical structure:
+Extract audio
 
-- `backend/data/uploads/` — uploaded videos (`{job_id}.mp4`)
-- `backend/data/audio/` — extracted WAV (`{job_id}.wav`) (audio jobs)
-- `backend/data/transcriptions/` — transcript JSON (audio jobs)
-- `backend/data/index/` — FAISS index + metadata (scene jobs)
-- `backend/data/clips/` — generated 10s clips (`{start}_{dur}.mp4`)
-- `backend/data/app.db` — SQLite job status store
+Transcribe speech (English / Tamil)
 
----
+Search transcript using remembered dialogue
 
-## API Endpoints
+Get:
 
-### Audio
-- `POST /audio/videos`  
-  Upload video + start transcription  
-  Params: `file`, `language=en|ta`, `model_size=tiny|base|small|medium|large-v3`
+⏱ Timestamp (hh:mm:ss)
 
-- `GET /audio/videos/{job_id}/status`  
-  Returns stage + progress + ready
+🎥 10-second video clip
 
-- `POST /audio/videos/{job_id}/search`  
-  Body: `{ query, top_k, clip_duration }`
+🖼 2) Scene Search (Visual Semantic Search)
 
-- `GET /audio/videos/{job_id}/clip?start=...&dur=10`  
-  Streams a 10-second clip
+Upload a video
 
-### Scene
-- `POST /scene/videos`  
-  Upload video + start frame indexing
+Sample frames (default: every 3 seconds)
 
-- `GET /scene/videos/{job_id}/status`
+Generate CLIP embeddings
 
-- `POST /scene/videos/{job_id}/search`  
-  Body: `{ query, top_k, clip_duration }`
+Index using FAISS
 
-- `GET /scene/videos/{job_id}/clip?start=...&dur=10`
+Search using a natural language scene description
 
----
+Get:
 
-## Prerequisites (Local Run)
+⏱ Timestamp
 
-### Required
-- **Python 3.10.x**
-- **Node 18+**
-- **FFmpeg installed and available in PATH**
-  - Check: `ffmpeg -version`
+🎥 10-second clip
 
-### Optional (GPU)
-- NVIDIA GPU + drivers (for faster scene/audio)
-- Torch CUDA build (installed via GPU requirements)
+💡 Design Principle
 
----
+Audio and Scene pipelines are completely independent.
 
-## Running locally (Windows)
+✔ Scene users do NOT wait for transcription
+✔ Audio users do NOT wait for frame embedding
 
-### 1) Backend (CPU)
-```powershell
+Each upload creates its own job and status lifecycle.
+
+🏗 Architecture
+React Frontend
+       ↓
+FastAPI Backend
+       ↓
+ ┌───────────────────────────────┐
+ │         Audio Pipeline        │
+ │ FFmpeg → Whisper → Search     │
+ └───────────────────────────────┘
+               │
+ ┌───────────────────────────────┐
+ │         Scene Pipeline        │
+ │ Frames → CLIP → FAISS Search  │
+ └───────────────────────────────┘
+               ↓
+      10s Clip Generator (FFmpeg)
+
+🛠 Tech Stack
+Backend
+
+FastAPI
+
+SQLite (job tracking)
+
+FFmpeg (audio extraction & clip cutting)
+
+faster-whisper
+
+Transformers (CLIP)
+
+FAISS
+
+PyTorch (CPU or CUDA)
+
+Frontend
+
+React + Vite
+
+Axios
+
+HTML5 Video Player
+
+🔍 How It Works
+🔊 Audio Search Pipeline
+
+Upload video → job_id.mp4
+
+Extract mono 16kHz WAV via FFmpeg
+
+Transcribe using Whisper
+
+Store transcript segments:
+
+start
+
+end
+
+text
+
+Search scoring:
+
+Word overlap
+
+Exact phrase bonus
+
+Return best match:
+
+Timestamp
+
+10-second clip
+
+🖼 Scene Search Pipeline
+
+Upload video
+
+Sample frames every 3 seconds
+
+Generate CLIP embeddings (512-dim normalized vectors)
+
+Build FAISS IndexFlatIP
+
+Embed text query
+
+Retrieve top-k nearest frames
+
+Return best timestamp + clip
+
+📁 Runtime Data (Ignored by Git)
+backend/data/
+  uploads/
+  audio/
+  transcriptions/
+  index/
+  clips/
+  app.db
+
+⚙️ Local Setup (Windows)
+📦 Requirements
+
+Python 3.10
+
+Node 18+
+
+FFmpeg installed & in PATH
+
+ffmpeg -version
+
+▶ Backend (CPU)
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
@@ -147,3 +177,134 @@ python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -r requirements\cpu.txt
 
 python run.py
+
+
+Backend:
+
+http://localhost:8000
+
+http://localhost:8000/docs
+
+🚀 Backend (GPU Optional)
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip setuptools wheel
+pip install --no-cache-dir -r requirements\gpu-cu124.txt
+
+python run.py
+
+
+Verify GPU:
+
+python -c "import torch; import torch.backends.cudnn as cudnn; print('Torch:', torch.__version__); print('GPU:', torch.cuda.is_available()); print('cuDNN:', cudnn.version())"
+
+💻 Frontend
+cd frontend
+npm install
+npm run dev
+
+
+Frontend:
+
+http://localhost:5173
+
+🐳 Docker Setup
+CPU Docker (Recommended)
+docker compose up --build
+
+
+Frontend:
+
+http://localhost:5173
+
+
+Backend:
+
+http://localhost:8000/docs
+
+GPU Docker (Advanced)
+
+Requires NVIDIA Docker runtime.
+
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+
+📡 API Endpoints
+Audio
+
+POST /audio/videos
+
+GET /audio/videos/{job_id}/status
+
+POST /audio/videos/{job_id}/search
+
+GET /audio/videos/{job_id}/clip?start=...&dur=10
+
+Scene
+
+POST /scene/videos
+
+GET /scene/videos/{job_id}/status
+
+POST /scene/videos/{job_id}/search
+
+GET /scene/videos/{job_id}/clip?start=...&dur=10
+
+🧠 Key Technical Highlights
+
+Multimodal AI search (text ↔ video frames)
+
+FAISS inner-product cosine similarity
+
+GPU-accelerated embedding
+
+Efficient frame sampling strategy
+
+Separate asynchronous job pipelines
+
+Production-style Docker setup
+
+Windows CUDA DLL resolution handling
+
+🛠 Troubleshooting
+405 Method Not Allowed
+
+Use Swagger:
+
+http://localhost:8000/docs
+
+206 Partial Content
+
+Normal behavior for video streaming (HTTP range requests).
+
+CUDA/cuDNN Error on Windows
+
+Start backend via:
+
+python run.py
+
+
+This project patches NVIDIA DLL paths before importing torch.
+
+FFmpeg Not Found
+
+Install FFmpeg and add to PATH.
+
+📈 Future Improvements
+
+Temporal smoothing for scene ranking
+
+Background task queue (Celery/Redis)
+
+YouTube ingestion
+
+Auto cleanup of large files
+
+Model quantization support
+
+WebSocket progress updates
+
+📄 License
+
+MIT License
