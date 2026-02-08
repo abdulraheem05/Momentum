@@ -25,3 +25,5 @@ def extract_frames(
 
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "ffmpeg frame extraction failed")
+    
+    
