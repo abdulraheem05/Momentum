@@ -1,3 +1,26 @@
+import os
+import sys
+
+# 1. Manually force Windows to find the new DLLs you just installed
+def patch_nvidia_dlls():
+    # Find where your venv lives
+    venv_site_packages = os.path.join(os.getcwd(), "venv", "Lib", "site-packages")
+    nvidia_base = os.path.join(venv_site_packages, "nvidia")
+
+    if os.path.exists(nvidia_base):
+        # We loop through every nvidia folder and add its 'bin' to the DLL path
+        for folder in os.listdir(nvidia_base):
+            bin_path = os.path.join(nvidia_base, folder, "bin")
+            if os.path.exists(bin_path):
+                os.add_dll_directory(bin_path)
+                print(f"--- Forced DLL Path: {bin_path} ---")
+
+# Run the patch immediately
+patch_nvidia_dlls()
+
+# NOW you can import torch
+import torch
+
 import uuid
 from pathlib import Path
 

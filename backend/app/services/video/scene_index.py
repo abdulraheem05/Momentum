@@ -29,7 +29,7 @@ def build_scene_index(
 
     index = build_index_ip(vectors)
 
-    index_path = INDEX_FRAMES_DIR/f"{video_id}.fiass"
+    index_path = INDEX_FRAMES_DIR/f"{video_id}.faiss"
     json_path = INDEX_FRAMES_DIR/f"{video_id}.json"
 
     timestamps = [i * every_n_seconds for i in range(len(image_paths))]
