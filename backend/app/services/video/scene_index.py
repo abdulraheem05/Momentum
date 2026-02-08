@@ -25,4 +25,22 @@ def build_scene_index(
 
     image_paths = sorted([str(p) for p in tmp_dir.glob("frame_*.jpg")])
 
-    embed_images_batched(image_paths, batch_size=batch_size)
+    vectors = embed_images_batched(image_paths, batch_size=batch_size)
+
+    index = build_index_ip(vectors)
+
+    index_path = INDEX_FRAMES_DIR/f"{video_id}.fiass"
+    json_path = INDEX_FRAMES_DIR/f"{video_id}.json"
+
+    timestamps = [i * every_n_seconds for i in range(len(image_paths))]
+
+    save_index(index, index_path)
+
+    save_json({
+        "every_n_seconds": every_n_seconds,
+        "resize_width": resize_width,
+        "count": len(image_paths),
+        "timestamps": timestamps
+    }, json_path)
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
