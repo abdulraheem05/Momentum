@@ -16,7 +16,7 @@ def ensure_dir() -> None:
         UPLOADS_DIR,
         AUDIO_DIR,
         TRANSCRIPTS_DIR,
-        INDEX_TEXT_DIR,
+        FRAMES_TMP_DIR,
         INDEX_FRAMES_DIR,
         CLIPS_DIR
     ]:
