@@ -3,6 +3,11 @@ import platform
 from pathlib import Path
 
 def patch_nvidia_dlls() -> None:
+    """
+    Windows-only. Ensures PyTorch/Transformers load the correct cuDNN/cuBLAS
+    DLLs from the venv's site-packages/nvidia/*/bin folders.
+    Must run BEFORE importing torch/transformers.
+    """
     if platform.system() != "Windows":
         return
 

@@ -1,0 +1,24 @@
+# Python junk
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local venv (never bake into image)
+venv/
+env/
+
+# Local runtime data (must not be copied into image)
+data/
+app.db
+*.db
+*.wav
+*.mp4
+*.faiss
+*.index
+*.json
+
+# HuggingFace cache (keep it outside build)
+.hf_cache/
+.cache/
