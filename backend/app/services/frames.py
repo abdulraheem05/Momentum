@@ -22,4 +22,6 @@ def extract_frames(
     ]
 
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    
+
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "ffmpeg frame extraction failed")
