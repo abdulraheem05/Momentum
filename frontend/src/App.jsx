@@ -13,22 +13,27 @@ function hhmmss(sec) {
 }
 
 export default function App() {
-  // Pre-upload settings
+  // Mode: "audio" or "scene"
+  const [mode, setMode] = useState("audio");
+
+  // Audio settings (only relevant in audio mode)
   const [language, setLanguage] = useState("en");
   const [modelSize, setModelSize] = useState("small");
 
   // Upload state
   const [file, setFile] = useState(null);
   const [uploadPct, setUploadPct] = useState(0);
-  const [videoId, setVideoId] = useState("");
+  const [jobId, setJobId] = useState("");
 
   // Pipeline status
   const [stage, setStage] = useState("");
   const [progress, setProgress] = useState(0);
-  const [readyToSearch, setReadyToSearch] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  // Search
-  const [dialogue, setDialogue] = useState("");
+  // Search input
+  const [queryText, setQueryText] = useState("");
+
+  // Search result
   const [searching, setSearching] = useState(false);
   const [best, setBest] = useState(null);
   const [alternates, setAlternates] = useState([]);
@@ -43,10 +48,9 @@ export default function App() {
 
   const pollTimer = useRef(null);
 
-  const canUpload = useMemo(() => !!file && !busy, [file, busy]);
   const canSearch = useMemo(
-    () => !!videoId && readyToSearch && dialogue.trim().length >= 2 && !searching,
-    [videoId, readyToSearch, dialogue, searching]
+    () => !!jobId && ready && queryText.trim().length >= 2 && !searching,
+    [jobId, ready, queryText, searching]
   );
 
   // Cleanup poller on unmount
@@ -57,11 +61,13 @@ export default function App() {
   }, []);
 
   const resetRun = () => {
+    setFile(null);
     setUploadPct(0);
-    setVideoId("");
+    setJobId("");
     setStage("");
     setProgress(0);
-    setReadyToSearch(false);
+    setReady(false);
+    setQueryText("");
     setBest(null);
     setAlternates([]);
     setClipUrl("");
@@ -71,18 +77,30 @@ export default function App() {
     pollTimer.current = null;
   };
 
+  const apiPaths = useMemo(() => {
+    if (mode === "audio") {
+      return {
+        upload: `${API_BASE}/audio/videos`,
+        status: (id) => `${API_BASE}/audio/videos/${id}/status`,
+        search: (id) => `${API_BASE}/audio/videos/${id}/search`,
+      };
+    }
+    return {
+      upload: `${API_BASE}/scene/videos`,
+      status: (id) => `${API_BASE}/scene/videos/${id}/status`,
+      search: (id) => `${API_BASE}/scene/videos/${id}/search`,
+    };
+  }, [mode]);
+
   const startPolling = (id) => {
     if (pollTimer.current) clearInterval(pollTimer.current);
 
     pollTimer.current = setInterval(async () => {
       try {
-        const res = await axios.get(`${API_BASE}/videos/${id}/status`);
+        const res = await axios.get(apiPaths.status(id));
         setStage(res.data.stage || "");
         setProgress(res.data.progress ?? 0);
-        setReadyToSearch(!!res.data.ready_to_search || !!res.data.ready_to_search === true ? true : !!res.data.ready_to_search);
-
-        // Your backend uses "ready_to_search" key (per your code).
-        // If you change backend to "ready_for_search", update here.
+        setReady(!!res.data.ready);
 
         if (res.data.error) {
           setError(res.data.error);
@@ -92,16 +110,15 @@ export default function App() {
           return;
         }
 
-        if (res.data.stage === "READY") {
-          setStatusMsg("Transcription ready. You can search now.");
+        if (res.data.ready) {
+          setStatusMsg(mode === "audio" ? "Audio transcription ready. You can search now." : "Scene index ready. You can search now.");
           clearInterval(pollTimer.current);
           pollTimer.current = null;
         } else {
-          setStatusMsg(`Processing: ${res.data.stage} (${res.data.progress}%)`);
+          setStatusMsg(`Processing (${mode}): ${res.data.stage} (${res.data.progress}%)`);
         }
       } catch (e) {
-        // If the server is restarting, this can fail briefly
-        // Don’t spam errors; show minimal message.
+        // ignore short blips (server restart etc.)
       }
     }, 2000);
   };
@@ -121,11 +138,15 @@ export default function App() {
 
     const form = new FormData();
     form.append("file", selectedFile);
-    form.append("language", language);
-    form.append("model_size", modelSize);
+
+    // Only audio upload needs language/model
+    if (mode === "audio") {
+      form.append("language", language);
+      form.append("model_size", modelSize);
+    }
 
     try {
-      const res = await axios.post(`${API_BASE}/videos`, form, {
+      const res = await axios.post(apiPaths.upload, form, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (evt) => {
           if (!evt.total) return;
@@ -134,14 +155,13 @@ export default function App() {
         },
       });
 
-      const id = res.data.video_id;
-      setVideoId(id);
+      const id = res.data.job_id;
+      setJobId(id);
       setStage("UPLOADED");
       setProgress(0);
-      setReadyToSearch(false);
-      setStatusMsg("Upload complete. Processing started…");
+      setReady(false);
 
-      // Start polling immediately
+      setStatusMsg("Upload complete. Processing started…");
       startPolling(id);
     } catch (e) {
       setError(e?.response?.data?.detail || e.message || "Upload failed");
@@ -155,19 +175,19 @@ export default function App() {
 
     setError("");
     setSearching(true);
-    setStatusMsg("Searching transcript…");
+    setStatusMsg(mode === "audio" ? "Searching transcript…" : "Searching scenes…");
     setBest(null);
     setAlternates([]);
     setClipUrl("");
 
     try {
       const body = {
-        query: dialogue,
-        top_k: 3,
+        query: queryText,
+        top_k: mode === "audio" ? 3 : 3,
         clip_duration: 10.0,
       };
 
-      const res = await axios.post(`${API_BASE}/videos/${videoId}/search`, body, {
+      const res = await axios.post(apiPaths.search(jobId), body, {
         headers: { "Content-Type": "application/json" },
       });
 
@@ -178,12 +198,12 @@ export default function App() {
       setAlternates(altRes);
 
       if (!bestRes) {
-        setStatusMsg("No matches found. Try a shorter/clearer phrase.");
+        setStatusMsg("No matches found. Try a clearer/shorter query.");
         return;
       }
 
-      // Build absolute URL for video tag
-      const absoluteClipUrl = `${API_BASE}${bestRes.clip_url}&t=${Date.now()}`;
+      // clip_url already includes /audio/... or /scene/... from backend
+      const absoluteClipUrl = `${API_BASE}${bestRes.clip_url}${bestRes.clip_url.includes("?") ? "&" : "?"}t=${Date.now()}`;
       setClipUrl(absoluteClipUrl);
 
       setStatusMsg(`Jumped to ${bestRes.timestamp || hhmmss(bestRes.start)}.`);
@@ -196,38 +216,27 @@ export default function App() {
 
   return (
     <div className="container">
-      <h2 className="title">Video Scene Finder</h2>
+      <h2 className="title">Video Finder</h2>
 
       <div className="card">
-        {/* SETTINGS */}
+        {/* MODE */}
         <div className="section">
-          <div className="sectionTitle">Language (choose before upload)</div>
+          <div className="sectionTitle">Choose Search Type</div>
 
           <div className="row">
             <div className="field">
-              <label>Language</label>
+              <label>Mode</label>
               <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                disabled={busy || !!videoId} // lock after upload begins
+                value={mode}
+                onChange={(e) => {
+                  // switching mode resets everything (separate uploads/status)
+                  resetRun();
+                  setMode(e.target.value);
+                }}
+                disabled={busy || !!jobId}
               >
-                <option value="en">English (en)</option>
-                <option value="ta">Tamil (ta)</option>
-              </select>
-            </div>
-
-            <div className="field">
-              <label>Model</label>
-              <select
-                value={modelSize}
-                onChange={(e) => setModelSize(e.target.value)}
-                disabled={busy || !!videoId}
-              >
-                <option value="tiny">tiny (fastest)</option>
-                <option value="base">base</option>
-                <option value="small">small</option>
-                <option value="medium">medium</option>
-                <option value="large-v3">large-v3 (slowest)</option>
+                <option value="audio">Audio search (dialogue)</option>
+                <option value="scene">Scene search (description)</option>
               </select>
             </div>
 
@@ -237,9 +246,41 @@ export default function App() {
           </div>
 
           <p className="hint">
-            Tip: use <b>tiny</b> for speed while testing. Switch to <b>small</b> for better accuracy.
+            Audio mode runs transcription (slower). Scene mode builds frame index only (faster).
           </p>
         </div>
+
+        {/* AUDIO SETTINGS (only show for audio mode) */}
+        {mode === "audio" && (
+          <div className="section">
+            <div className="sectionTitle">Audio Settings (before upload)</div>
+
+            <div className="row">
+              <div className="field">
+                <label>Language</label>
+                <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={busy || !!jobId}>
+                  <option value="en">English (en)</option>
+                  <option value="ta">Tamil (ta)</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label>Model</label>
+                <select value={modelSize} onChange={(e) => setModelSize(e.target.value)} disabled={busy || !!jobId}>
+                  <option value="tiny">tiny (fastest)</option>
+                  <option value="base">base</option>
+                  <option value="small">small</option>
+                  <option value="medium">medium</option>
+                  <option value="large-v3">large-v3 (slowest)</option>
+                </select>
+              </div>
+            </div>
+
+            <p className="hint">
+              Tip: Use <b>tiny</b> while testing. Switch to <b>small</b> for better accuracy.
+            </p>
+          </div>
+        )}
 
         {/* UPLOAD */}
         <div className="section">
@@ -249,12 +290,12 @@ export default function App() {
             className="fileInput"
             type="file"
             accept="video/*"
-            disabled={busy || !!videoId}
+            disabled={busy || !!jobId}
             onChange={(e) => {
               const f = e.target.files?.[0] || null;
               setFile(f);
               if (f) {
-                // start a fresh run and auto-upload
+                // new run per upload
                 resetRun();
                 setFile(f);
                 autoUpload(f);
@@ -269,34 +310,35 @@ export default function App() {
             </div>
           </div>
 
-          {videoId && (
+          {jobId && (
             <div className="metaBox">
-              <div><b>Video ID:</b> {videoId}</div>
+              <div><b>Job ID:</b> {jobId}</div>
+              <div><b>Mode:</b> {mode}</div>
               <div><b>Stage:</b> {stage || "-"}</div>
               <div><b>Progress:</b> {progress}%</div>
             </div>
           )}
         </div>
 
-        {/* DIALOGUE INPUT */}
+        {/* QUERY INPUT */}
         <div className="section">
-          <div className="sectionTitle">Dialogue you remember</div>
+          <div className="sectionTitle">{mode === "audio" ? "Dialogue you remember" : "Scene description"}</div>
 
           <textarea
             className="textarea"
-            placeholder="Type the dialogue you remember…"
-            value={dialogue}
-            onChange={(e) => setDialogue(e.target.value)}
-            disabled={!videoId} // allow typing after upload starts
+            placeholder={mode === "audio" ? "Type the dialogue you remember…" : "Describe the scene… (e.g., 'a man speaking on stage')"}
+            value={queryText}
+            onChange={(e) => setQueryText(e.target.value)}
+            disabled={!jobId}
           />
 
           <button className="primaryBtn" onClick={runSearch} disabled={!canSearch}>
-            {searching ? "Searching…" : readyToSearch ? "Search" : "Search (wait for transcription)"}
+            {searching ? "Searching…" : ready ? "Search" : "Search (wait until ready)"}
           </button>
 
-          {!readyToSearch && videoId && (
+          {!ready && jobId && (
             <div className="smallNote">
-              Search will unlock after transcription finishes.
+              Search will unlock after processing finishes.
             </div>
           )}
         </div>
@@ -309,7 +351,15 @@ export default function App() {
             <>
               <div className="resultCard">
                 <div className="pill">{best.timestamp || hhmmss(best.start)}</div>
-                <div className="resultText">{best.text}</div>
+
+                {/* Audio returns text; Scene may not return text */}
+                {best.text ? (
+                  <div className="resultText">{best.text}</div>
+                ) : (
+                  <div className="resultText mutedText">
+                    Scene match found (score: {best.score})
+                  </div>
+                )}
               </div>
 
               {clipUrl && (
@@ -324,7 +374,9 @@ export default function App() {
                   {alternates.map((a, idx) => (
                     <div key={idx} className="altItem">
                       <span className="pill muted">{a.timestamp || hhmmss(a.start)}</span>
-                      <span className="altText">{a.text}</span>
+                      <span className="altText">
+                        {a.text ? a.text : `Scene match (score: ${a.score})`}
+                      </span>
                     </div>
                   ))}
                 </div>
