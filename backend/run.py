@@ -1,5 +1,5 @@
-from app.core.win_dlls import add_nvidia_dll_dirs
-add_nvidia_dll_dirs()
+from app.core.win_dlls import patch_nvidia_dlls
+patch_nvidia_dlls()
 
 import uvicorn
 

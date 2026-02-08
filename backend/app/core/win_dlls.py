@@ -2,7 +2,7 @@ import os
 import platform
 from pathlib import Path
 
-def add_nvidia_dll_dirs() -> None:
+def patch_nvidia_dlls() -> None:
     if platform.system() != "Windows":
         return
 
@@ -10,12 +10,11 @@ def add_nvidia_dll_dirs() -> None:
     if not venv:
         return
 
-    base = Path(venv)
-    paths = [
-        base / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
-        base / "Lib" / "site-packages" / "nvidia" / "cudnn" / "bin",
-    ]
+    nvidia_base = Path(venv) / "Lib" / "site-packages" / "nvidia"
+    if not nvidia_base.exists():
+        return
 
-    for p in paths:
-        if p.exists():
-            os.add_dll_directory(str(p.resolve()))
+    for folder in nvidia_base.iterdir():
+        bin_path = folder / "bin"
+        if bin_path.exists():
+            os.add_dll_directory(str(bin_path.resolve()))
