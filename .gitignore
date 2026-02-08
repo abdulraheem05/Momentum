@@ -32,7 +32,7 @@ data/audio/
 data/transcriptions/
 data/index/
 data/clips/
-data/temp/
+data/frames_tmp/
 
 # --- Environment Secrets ---
 .env
