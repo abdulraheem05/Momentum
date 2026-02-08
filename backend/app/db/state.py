@@ -12,7 +12,7 @@ def _connect() -> sqlite3.Connection :
     con.row_factory = sqlite3.Row
     return con 
 
-def _init() -> None:
+def init_db() -> None:
     con = _connect()
     cur = con.cursor()
 
