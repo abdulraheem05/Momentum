@@ -22,3 +22,28 @@ def get_clip_model_and_processor():
         _clip_model.to(_device)
 
     return _clip_model, _clip_processor, _device
+
+
+@torch.inference_mode
+def embed_images_batched(
+    image_paths: list[str],
+    batch_size: int = 64
+) -> np.ndarray:
+    
+    model, processor, device = get_clip_model_and_processor()
+
+    all_vectors = []
+
+    for i in range (0, len(image_paths), batch_size):
+        batch_paths = image_paths[i:i+batch_size]
+        images = [Image.open(p).convert("RGB") for p in batch_paths]
+
+        inputs = processor(images=images, return_tensors=True, padding=True)
+        inputs = {k:v.to(device) for k,v in inputs.items()}
+
+        feat = model.get_image_features(inputs)
+        feat = feat/ feat.norm(p=2, dim=-1, keepdim=True)
+
+        all_vectors.append(feat.detach().float().cpu().numpy())
+
+    return np.vstack(all_vectors).astype("float32")
