@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from app.core.paths import DATA_DIR
 
@@ -17,12 +17,13 @@ def _init() -> None:
     cur = con.cursor()
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS videos(
-                video_id TEXT PRIMARY KEY,
-                language TEXT NOT NULL,
-                model_size TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS jobs(
+                job_id TEXT PRIMARY KEY,
+                mode TEXT NOT NULL,
+                language TEXT ,
+                model_size TEXT ,
                 stage TEXT NOT NULL,
-                progress TEXT NOT NULL,
+                progress INTEGER NOT NULL,
                 error TEXT
             )
     """)
@@ -30,45 +31,51 @@ def _init() -> None:
     con.commit()
     con.close()
 
-def create_video(video_id: str, language: str, model_size: str) -> None:
+def create_job(job_id: str, mode: str, language: Optional[str] = None, model_size: Optional[str] = None) -> None:
+    
+    if mode not in ["audio","scene"]:
+        raise ValueError("Mode must be either scene or audio")
+    
     con = _connect()
     cur = con.cursor()
 
     cur.execute("""
-    INSERT INTO videos (video_id, language, model_size, stage, progress, error)
+    INSERT INTO jobs (video_id, mode, language, model_size, stage, progress, error)
     VALUES (?, ?, ?, ?, ?, NULL);
-    """, (video_id, language, model_size, "UPLOADED", 0))
+    """, (job_id, mode ,language, model_size, "UPLOADED", 0))
 
     con.commit()
     con.close()
 
 
-def update_status(video_id: str, stage: str, progress: int, error: Optional[str] = None) -> None:
+def update_status(job_id: str, stage: str, progress: int, error: Optional[str] = None) -> None:
     con = _connect()
     cur = con.cursor()
 
     cur.execute("""
     UPDATE videos
     SET stage = ?, progress = ?, error = ?
-    WHERE video_id = ?;
-    """, (stage, progress, error, video_id))
+    WHERE job_id = ?;
+    """, (stage, progress, error, job_id))
 
     con.commit()
     con.close()
 
-def get_video(video_id: str) -> Optional[dict]:
+def get_job(job_id: str) -> Optional[dict[str, Any]]:
     con = _connect()
     cur = con.cursor()
 
-    cur.execute("SELECT * FROM videos WHERE video_id = ?;", (video_id,))
+    cur.execute("SELECT * FROM jobs WHERE job_id = ?;", (job_id,))
     row = cur.fetchone()
     con.close()
 
     return dict(row) if row else None
 
-def delete_video_row(video_id: str) -> None:
+
+def delete_job_row(job_id: str) -> None:
     con = _connect()
     cur = con.cursor()
-    cur.execute("DELETE FROM videos WHERE video_id = ?;", (video_id,))
+
+    cur.execute("DELETE FROM jobs WHERE job_id = ?;", (job_id,))
     con.commit()
     con.close()
