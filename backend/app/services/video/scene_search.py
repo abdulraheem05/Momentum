@@ -18,4 +18,18 @@ def search_scene(
     json = load_json(json_path)
     timestamps = json["timestamps"]
 
-    
+    qvec = embed_text(query).reshape(1,-1)
+
+    scores, idxs = index.search(qvec, top_k)
+
+    out = []
+
+    for score, id in zip(scores[0], idxs[0]):
+        if id < 0:
+            continue
+
+        out.append({"score":float(score) , "start": float(timestamps[id])})
+
+    return out
+
+
