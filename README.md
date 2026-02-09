@@ -1,4 +1,4 @@
-# 🎬 Video Finder
+# 🎬 Momentum
 ### Audio Search + Scene Search (FastAPI • React • CLIP • FAISS • Whisper)
 
 [![Python](https://img.shields.io/badge/Python-3.10-blue.svg)]()
