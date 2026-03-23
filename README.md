@@ -14,7 +14,7 @@
 
 ## 🚀 Overview
 
-**Video Finder** is a full-stack AI-powered video search system. It allows users to locate specific moments within a video using two independent, high-performance pipelines.
+**Momentum** is a full-stack AI-powered video search system. It allows users to locate specific moments within a video using two independent, high-performance pipelines.
 
 ### 🔊 1. Audio Search (Dialogue-Based)
 - **Transcription:** Uses **Whisper** to convert speech (English/Tamil) into time-stamped text.
