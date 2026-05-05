@@ -92,35 +92,6 @@ Typical structure:
 
 ---
 
-## API Endpoints
-
-### Audio
-- `POST /audio/videos`  
-  Upload video + start transcription  
-  Params: `file`, `language=en|ta`, `model_size=tiny|base|small|medium|large-v3`
-
-- `GET /audio/videos/{job_id}/status`  
-  Returns stage + progress + ready
-
-- `POST /audio/videos/{job_id}/search`  
-  Body: `{ query, top_k, clip_duration }`
-
-- `GET /audio/videos/{job_id}/clip?start=...&dur=10`  
-  Streams a 10-second clip
-
-### Scene
-- `POST /scene/videos`  
-  Upload video + start frame indexing
-
-- `GET /scene/videos/{job_id}/status`
-
-- `POST /scene/videos/{job_id}/search`  
-  Body: `{ query, top_k, clip_duration }`
-
-- `GET /scene/videos/{job_id}/clip?start=...&dur=10`
-
----
-
 ## Prerequisites (Local Run)
 
 ### Required
@@ -147,3 +118,5 @@ python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -r requirements\cpu.txt
 
 python run.py
+
+### 2) 

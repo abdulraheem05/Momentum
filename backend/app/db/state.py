@@ -1,85 +1,89 @@
-import sqlite3
-from pathlib import Path
+import psycopg2
+from psycopg2 import extras
+import os
+from dotenv import load_dotenv
 from typing import Optional, Any
 
-from app.core.paths import DATA_DIR
+load_dotenv()
 
-DB_PATH = DATA_DIR / "app.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-
-def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
-
+def _connect():
+    # We use extras.RealDictCursor so the data comes back as a dictionary automatically
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=extras.RealDictCursor)
+    return conn
 
 def init_db() -> None:
-    con = _connect()
-    cur = con.cursor()
+    conn = _connect()
+    cur = conn.cursor()
 
-    # New table: one row per upload/job (audio OR scene)
+    # Postgres syntax for CREATE TABLE
     cur.execute("""
     CREATE TABLE IF NOT EXISTS jobs (
         job_id TEXT PRIMARY KEY,
-        mode TEXT NOT NULL,            -- 'audio' or 'scene'
-        language TEXT,                 -- only for audio jobs
-        model_size TEXT,               -- only for audio jobs
+        mode TEXT NOT NULL,             -- 'audio' or 'scene'
+        language TEXT,                  -- only for audio jobs
+        model_size TEXT,                -- only for audio jobs
         stage TEXT NOT NULL,
         progress INTEGER NOT NULL,
         error TEXT
     );
     """)
 
-    con.commit()
-    con.close()
-
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def create_job(job_id: str, mode: str, language: Optional[str] = None, model_size: Optional[str] = None) -> None:
     if mode not in ("audio", "scene"):
         raise ValueError("mode must be 'audio' or 'scene'")
 
-    con = _connect()
-    cur = con.cursor()
+    conn = _connect()
+    cur = conn.cursor()
 
+    # Note: Changed ? to %s for PostgreSQL
     cur.execute("""
     INSERT INTO jobs (job_id, mode, language, model_size, stage, progress, error)
-    VALUES (?, ?, ?, ?, ?, ?, NULL);
+    VALUES (%s, %s, %s, %s, %s, %s, NULL);
     """, (job_id, mode, language, model_size, "UPLOADED", 0))
 
-    con.commit()
-    con.close()
-
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def update_status(job_id: str, stage: str, progress: int, error: Optional[str] = None) -> None:
-    con = _connect()
-    cur = con.cursor()
+    conn = _connect()
+    cur = conn.cursor()
 
+    # Note: Changed ? to %s
     cur.execute("""
     UPDATE jobs
-    SET stage = ?, progress = ?, error = ?
-    WHERE job_id = ?;
+    SET stage = %s, progress = %s, error = %s
+    WHERE job_id = %s;
     """, (stage, int(progress), error, job_id))
 
-    con.commit()
-    con.close()
-
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def get_job(job_id: str) -> Optional[dict[str, Any]]:
-    con = _connect()
-    cur = con.cursor()
+    conn = _connect()
+    cur = conn.cursor()
 
-    cur.execute("SELECT * FROM jobs WHERE job_id = ?;", (job_id,))
+    cur.execute("SELECT * FROM jobs WHERE job_id = %s;", (job_id,))
     row = cur.fetchone()
-    con.close()
+    
+    cur.close()
+    conn.close()
 
-    return dict(row) if row else None
-
+    # RealDictCursor returns a dictionary already, so we just return the row
+    return row
 
 def delete_job_row(job_id: str) -> None:
-    con = _connect()
-    cur = con.cursor()
+    conn = _connect()
+    cur = conn.cursor()
 
-    cur.execute("DELETE FROM jobs WHERE job_id = ?;", (job_id,))
-    con.commit()
-    con.close()
+    cur.execute("DELETE FROM jobs WHERE job_id = %s;", (job_id,))
+    conn.commit()
+    cur.close()
+    conn.close()

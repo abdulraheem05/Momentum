@@ -22,6 +22,18 @@ from app.services.audio.transcript_store import save_transcript, load_transcript
 from app.services.video.scene_index import build_scene_index
 from app.services.video.scene_search import search_scene
 
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Initialize Azure Client
+AZURE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+CONTAINER_NAME = os.getenv("AZURE_CONTAINER_NAME")
+blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+
 
 app = FastAPI(title="Video Finder (Audio + Scene)")
 
@@ -53,23 +65,18 @@ def _normalize(txt: str) -> str:
     return " ".join(txt.lower().strip().split())
 
 
-async def _save_upload_to_disk(file: UploadFile, job_id: str) -> Path:
+async def _upload_to_azure(file: UploadFile, job_id: str) -> str:
     ext = Path(file.filename).suffix.lower() or ".mp4"
-    dest = UPLOADS_DIR / f"{job_id}{ext}"
-
+    blob_name = f"uploads/{job_id}{ext}"
+    
+    blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=blob_name)
+    
     try:
-        with open(dest, "wb") as out:
-            while True:
-                chunk = await file.read(CHUNK_SIZE)
-                if not chunk:
-                    break
-                out.write(chunk)
+        # Stream the upload directly to Azure
+        blob_client.upload_blob(file.file, overwrite=True)
+        return blob_name
     except Exception as e:
-        if dest.exists():
-            dest.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"File upload failed: {e}")
-
-    return dest
+        raise HTTPException(status_code=500, detail=f"Azure Upload failed: {e}")    
 
 
 # -------------------- background pipelines --------------------
@@ -162,6 +169,7 @@ class SceneSearchRequest(BaseModel):
 
 @app.post("/audio/videos")
 async def upload_audio_video(
+    
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     language: str = "en",
@@ -170,10 +178,19 @@ async def upload_audio_video(
     if language not in ("en", "ta"):
         raise HTTPException(status_code=400, detail="Language must be 'en' or 'ta'")
 
-    job_id = str(uuid.uuid4())
-    await _save_upload_to_disk(file, job_id)
+    ext = Path(file.filename).suffix.lower() or ".mp4"
+    blob_name = f"uploads/{job_id}{ext}"
 
-    create_job(job_id=job_id, mode="audio", language=language, model_size=model_size)
+    await _upload_to_azure(file, job_id)
+
+    create_job(
+        job_id=job_id,
+        mode="audio",
+        language=language,
+        model_size=model_size,
+        ext=ext,
+        blob_name=blob_name
+    )
     background_tasks.add_task(process_audio, job_id)
 
     return {"job_id": job_id, "mode": "audio", "message": "Uploaded. Audio processing started."}
@@ -245,6 +262,18 @@ def audio_search(job_id: str, body: AudioSearchRequest):
     return {"job_id": job_id, "mode": "audio", "best": best, "alternates": alternates}
 
 
+def get_azure_sas_url(blob_name: str):
+    sas_token = generate_blob_sas(
+        account_name=blob_service_client.account_name,
+        container_name=CONTAINER_NAME,
+        blob_name=blob_name,
+        account_key=blob_service_client.credential.account_key,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.utcnow() + timedelta(hours=1) # Valid for 1 hour
+    )
+    return f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob_name}?{sas_token}"
+
+
 @app.get("/audio/videos/{job_id}/clip")
 def audio_clip(job_id: str, start: float, dur: float = 10.0):
     row = get_job(job_id)
@@ -253,15 +282,15 @@ def audio_clip(job_id: str, start: float, dur: float = 10.0):
     if row["mode"] != "audio":
         raise HTTPException(status_code=400, detail="This job_id is not an audio job")
 
-    video_path = find_video_path(job_id)
-    if not video_path:
-        raise HTTPException(status_code=404, detail="Video not found on disk")
+    blob_name = f"uploads/{job_id}.mp4"
+    url = get_azure_sas_url(blob_name)
 
-    out_path = CLIPS_DIR / "audio" / job_id / f"{int(start)}_{int(dur)}.mp4"
-    if not out_path.exists():
-        cut_clip(video_path, out_path, float(start), float(dur))
+    if not url:
+        raise HTTPException(status_code=404, detail="Video not found")
 
-    return FileResponse(str(out_path), media_type="video/mp4")
+    streaming_url = f"{url}#t={start},{start+dur}"
+
+    return {"clip_url": streaming_url}
 
 
 # -------------------- SCENE endpoints --------------------
