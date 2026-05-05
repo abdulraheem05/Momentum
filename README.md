@@ -116,12 +116,10 @@ pip install --no-cache-dir -r requirements\gpu-cu124.txt
 # Start the server
 python run.py
 
-<<<<<<< HEAD
 ### 2) 
-=======
 ```
 
-### 💻 Frontend Setup
+### 💻 Frontend Setup 
 
 ```bash
 cd frontend
@@ -178,4 +176,3 @@ backend/data/
 * **206 Partial Content:** This is expected! It means the server is successfully streaming video chunks to your browser.
 
 ---
->>>>>>> 9fcb3f88aff410770fdd1edaf0324a08c29647ea
