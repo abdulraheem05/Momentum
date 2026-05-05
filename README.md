@@ -1,97 +1,74 @@
-# Video Finder — Audio Search + Scene Search (FastAPI + React)
+# 🎬 Momentum
+### Audio Search + Scene Search (FastAPI • React • CLIP • FAISS • Whisper)
 
-This project helps you find a moment inside a video using two independent pipelines:
+[![Python](https://img.shields.io/badge/Python-3.10-blue.svg)]()
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)]()
+[![React](https://img.shields.io/badge/React-Frontend-61DAFB.svg)]()
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.6+-EE4C2C.svg)]()
+[![Docker](https://img.shields.io/badge/Docker-Supported-2496ED.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
 
-1) **Audio Search (Dialogue Search)**
-   - Upload a video
-   - Extract audio
-   - Transcribe speech (English/Tamil)
-   - Search the transcript for a phrase the user remembers
-   - Return:
-     - best timestamp (hh:mm:ss)
-     - a 10-second clip around that time
-
-2) **Scene Search (Visual Search / Scene Description)**
-   - Upload a video
-   - Sample frames (default: 1 frame every 3 seconds)
-   - Compute CLIP embeddings for frames (GPU supported)
-   - Build a FAISS index for fast similarity search
-   - Search using a scene description prompt
-   - Return:
-     - best timestamp (hh:mm:ss)
-     - a 10-second clip around that time
-
-✅ Key design choice: **Audio and Scene are separate uploads/jobs**  
-So a scene-only user never waits for transcription, and an audio-only user never waits for frame indexing.
+> Find the exact moment inside a video using **dialogue memory** (speech-to-text) or **scene description** (visual semantic search).
 
 ---
 
-## Tech Stack
+## 🚀 Overview
 
-- **Backend:** FastAPI (Python)
-- **Frontend:** React + Vite
-- **Audio:** FFmpeg → WAV → faster-whisper (GPU optional)
-- **Scene:** Frame sampling → CLIP embeddings → FAISS index
-- **Storage:** Local filesystem + SQLite job status
+**Momentum** is a full-stack AI-powered video search system. It allows users to locate specific moments within a video using two independent, high-performance pipelines.
 
----
+### 🔊 1. Audio Search (Dialogue-Based)
+- **Transcription:** Uses **Whisper** to convert speech (English/Tamil) into time-stamped text.
+- **Search:** Search the transcript using remembered dialogue.
+- **Output:** Returns the exact timestamp and a generated **10-second video clip** of the moment.
 
-## How the pipelines work
-
-### A) Audio Search pipeline
-**Goal:** find timestamp based on dialogue the user remembers.
-
-Steps:
-1. Upload video as `job_id.mp4`
-2. FFmpeg extracts mono 16kHz WAV:
-   - `uploads/job_id.mp4` → `audio/job_id.wav`
-3. Transcribe WAV with faster-whisper into segments:
-   - Each segment includes:
-     - `start` time (seconds)
-     - `end` time
-     - text
-4. Search:
-   - normalize query + segment text
-   - score segments by word overlap + exact phrase bonus
-5. Best match is returned with:
-   - `timestamp` (hh:mm:ss)
-   - `clip_url` to fetch a 10s clip
-
-### B) Scene Search pipeline
-**Goal:** find timestamp based on a visual description prompt.
-
-Steps:
-1. Upload video as `job_id.mp4`
-2. Sample frames every N seconds (default `3s`):
-   - frames saved temporarily or directly embedded
-3. Compute CLIP embeddings:
-   - image embeddings: `[N, 512]` float32 (normalized)
-4. Build FAISS IndexFlatIP:
-   - inner product on normalized vectors == cosine similarity
-5. Search:
-   - embed the text query using CLIP text encoder
-   - retrieve top-k nearest frame embeddings
-6. Best match returned with:
-   - `timestamp` (hh:mm:ss)
-   - `clip_url` to fetch a 10s clip
+### 🖼 2. Scene Search (Visual Semantic Search)
+- **Indexing:** Samples frames every 3 seconds and generates **CLIP** embeddings.
+- **Vector Search:** Uses **FAISS** for rapid similarity matching.
+- **Output:** Search using natural language descriptions (e.g., "a person walking on the beach") to get the best matching timestamp and clip.
 
 ---
 
-## Files/folders created at runtime (backend/data)
+## 🏗 Architecture
 
-The backend writes runtime artifacts into `backend/data/` (ignored by Git).
 
-Typical structure:
 
-- `backend/data/uploads/` — uploaded videos (`{job_id}.mp4`)
-- `backend/data/audio/` — extracted WAV (`{job_id}.wav`) (audio jobs)
-- `backend/data/transcriptions/` — transcript JSON (audio jobs)
-- `backend/data/index/` — FAISS index + metadata (scene jobs)
-- `backend/data/clips/` — generated 10s clips (`{start}_{dur}.mp4`)
-- `backend/data/app.db` — SQLite job status store
+```text
+React Frontend (UI)
+        ↓
+FastAPI Backend (Orchestrator)
+        ↓
+┌───────────────────────────────┐      ┌───────────────────────────────┐
+│        Audio Pipeline         │      │        Scene Pipeline         │
+│ FFmpeg → Whisper → Search     │      │ Frames → CLIP → FAISS Search  │
+└───────────────────────────────┘      └───────────────────────────────┘
+                │                                      │
+                └───────▶ 10s Clip Generator ◀─────────┘
+                          (via FFmpeg)
+
+```
 
 ---
 
+## 🛠 Tech Stack
+
+### Backend
+
+* **FastAPI:** High-performance web framework.
+* **SQLite:** Job and metadata tracking.
+* **FFmpeg:** Audio extraction and dynamic video clipping.
+* **AI Models:** `faster-whisper` (Speech), `Transformers/CLIP` (Vision).
+* **Vector DB:** **FAISS** (Facebook AI Similarity Search).
+* **PyTorch:** Backend engine for model inference (CPU/CUDA).
+
+### Frontend
+
+* **React + Vite:** Modern, fast frontend build tool.
+* **Axios:** API communication.
+* **HTML5 Video Player:** Native streaming support.
+
+---
+
+<<<<<<< HEAD
 ## Prerequisites (Local Run)
 
 ### Required
@@ -110,13 +87,95 @@ Typical structure:
 
 ### 1) Backend (CPU)
 ```powershell
+=======
+## ⚙️ Local Setup (Windows)
+
+### 📦 Requirements
+
+* Python 3.10.x
+* Node 18+
+* **FFmpeg** installed and added to your system `PATH`.
+
+### ▶ Backend Setup
+
+```bash
+>>>>>>> 9fcb3f88aff410770fdd1edaf0324a08c29647ea
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 
+# Upgrade pip and install requirements
 python -m pip install --upgrade pip setuptools wheel
+
+# FOR CPU:
 pip install --no-cache-dir -r requirements\cpu.txt
 
+# FOR GPU (Optional - CUDA 12.4):
+pip install --no-cache-dir -r requirements\gpu-cu124.txt
+
+# Start the server
 python run.py
 
+<<<<<<< HEAD
 ### 2) 
+=======
+```
+
+### 💻 Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+
+```
+
+* **Frontend:** `http://localhost:5173`
+* **API Docs:** `http://localhost:8000/docs`
+
+---
+
+## 🐳 Docker Setup
+
+### CPU Version (Recommended for testing)
+
+```bash
+docker compose up --build
+
+```
+
+### GPU Version (Requires NVIDIA Docker runtime)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+
+```
+
+---
+
+## 📁 Runtime Data Structure
+
+*Note: These folders are created automatically and are ignored by `.gitignore`.*
+
+```text
+backend/data/
+  ├── uploads/        # Original video files
+  ├── audio/          # Extracted audio tracks
+  ├── transcriptions/ # JSON segment data
+  ├── index/          # FAISS vector indices
+  ├── clips/          # Generated 10s result segments
+  └── app.db          # Job tracking database
+
+```
+
+---
+
+## 🛠 Troubleshooting
+
+* **CUDA/cuDNN Error:** If on Windows, always start the backend via `python run.py`. It contains a custom patch to fix NVIDIA DLL pathing issues.
+* **405 Method Not Allowed:** Double-check your URL in the frontend or use the Swagger UI (`/docs`) to verify the route.
+* **FFmpeg Not Found:** Run `ffmpeg -version` in your terminal. If it fails, you must install FFmpeg and add the `bin` folder to your Environment Variables.
+* **206 Partial Content:** This is expected! It means the server is successfully streaming video chunks to your browser.
+
+---
+>>>>>>> 9fcb3f88aff410770fdd1edaf0324a08c29647ea
