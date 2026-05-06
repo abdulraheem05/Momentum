@@ -70,20 +70,6 @@ async def upload_to_azure(file: UploadFile, blob_name: str):
     await file.seek(0)
 
 
-def download_blob_to_temp(blob_name: str, suffix=".mp4") -> str:
-    blob_client = blob_service_client.get_blob_client(
-        container=CONTAINER_NAME,
-        blob=blob_name
-    )
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    with open(tmp.name, "wb") as f:
-        stream = blob_client.download_blob()
-        f.write(stream.readall())
-
-    return tmp.name
-
-
 # -------------------- Background Tasks --------------------
 
 def process_audio(job_id: str):
@@ -93,14 +79,15 @@ def process_audio(job_id: str):
             return
 
         blob_name = row["blob_name"]
-        ext = row["ext"]
-
-        update_status(job_id, "DOWNLOADING", 10)
-        video_path = download_blob_to_temp(blob_name, suffix=ext)
+        video_url = get_azure_sas_url(blob_name)
 
         update_status(job_id, "EXTRACT_AUDIO", 30)
+
+        # temp file ONLY for extracted wav (not full video)
         audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-        extract_audio_wav(video_path, audio_path)
+
+        # 🔥 IMPORTANT: extract directly from URL
+        extract_audio_wav(video_url, audio_path)
 
         update_status(job_id, "TRANSCRIBE", 70)
         transcript = transcribe_audio(audio_path, row["language"], row["model_size"])
@@ -108,7 +95,6 @@ def process_audio(job_id: str):
         update_status(job_id, "SAVE_TRANSCRIPT", 90)
         save_transcript(job_id, transcript)
 
-        os.remove(video_path)
         os.remove(audio_path)
 
         update_status(job_id, "READY_AUDIO", 100)
@@ -124,26 +110,41 @@ def process_scene(job_id: str):
             return
 
         blob_name = row["blob_name"]
-        ext = row["ext"]
-
-        update_status(job_id, "DOWNLOADING", 10)
-        video_path = download_blob_to_temp(blob_name, suffix=ext)
+        video_url = get_azure_sas_url(blob_name)
 
         update_status(job_id, "SCENE_INDEX", 50)
+
+        # 🔥 Pass URL instead of file path
         build_scene_index(
             video_id=job_id,
-            video_path=video_path,
+            video_url=video_url,
             every_n_seconds=3,
             resize_width=320,
             batch_size=64,
         )
 
-        os.remove(video_path)
-
         update_status(job_id, "READY_SCENE", 100)
 
     except Exception as e:
         update_status(job_id, "FAILED_SCENE", 0, str(e))
+
+
+def process_scene_shard(job_id: str, start_sec: int, end_sec: int):
+    try:
+        row = get_job(job_id)
+
+        video_url = get_azure_sas_url(row["blob_name"])
+
+        build_scene_index(
+            video_id=job_id,
+            video_url=video_url,
+            start_time=start_sec,
+            end_time=end_sec,
+            every_n_seconds=3,
+        )
+
+    except Exception as e:
+        print(f"Shard failed: {e}")
 
 
 # -------------------- Request Models --------------------
@@ -184,44 +185,26 @@ def audio_search(job_id: str, body: AudioSearchRequest):
     if not row or row["stage"] != "READY_AUDIO":
         raise HTTPException(status_code=400, detail="Not ready")
 
+    blob_name = row["blob_name"]
+    base_url = get_azure_sas_url(blob_name)
+
     data = load_transcript(job_id)
     segments = data.get("segments", [])
 
     results = []
+
     for seg in segments:
         if body.query.lower() in seg["text"].lower():
             start = float(seg["start"])
-            clip_blob = f"clips/{job_id}/{int(start)}.mp4"
+
             results.append({
                 "start": start,
                 "timestamp": convert_sec_to_hhmmss(start),
-                "clip_url": get_azure_sas_url(clip_blob)
+                # 🔥 INSTANT CLIP (NO FFMPEG)
+                "clip_url": f"{base_url}#t={start},{start+body.clip_duration}"
             })
 
     return {"results": results[:body.top_k]}
-
-
-@app.get("/audio/videos/{job_id}/clip")
-def audio_clip(job_id: str, start: float, dur: float = 10.0):
-    row = get_job(job_id)
-    if not row:
-        raise HTTPException(status_code=404)
-
-    video_path = download_blob_to_temp(row["blob_name"], suffix=row["ext"])
-
-    tmp_clip = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    cut_clip(video_path, tmp_clip, start, dur)
-
-    clip_blob = f"clips/{job_id}/{int(start)}_{int(dur)}.mp4"
-    blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=clip_blob)
-
-    with open(tmp_clip, "rb") as f:
-        blob_client.upload_blob(f, overwrite=True)
-
-    os.remove(video_path)
-    os.remove(tmp_clip)
-
-    return {"clip_url": get_azure_sas_url(clip_blob)}
 
 
 # -------------------- SCENE --------------------
@@ -243,41 +226,25 @@ async def upload_scene_video(background_tasks: BackgroundTasks, file: UploadFile
 
 @app.post("/scene/videos/{job_id}/search")
 def scene_search_endpoint(job_id: str, body: SceneSearchRequest):
+    row = get_job(job_id)
+
+    blob_name = row["blob_name"]
+    base_url = get_azure_sas_url(blob_name)
+
     hits = search_scene(job_id, body.query, top_k=body.top_k)
 
     results = []
     for h in hits:
         start = float(h["start"])
+
         results.append({
             "start": start,
             "timestamp": convert_sec_to_hhmmss(start),
-            "clip_url": f"/scene/videos/{job_id}/clip?start={start}&dur={body.clip_duration}"
+            # 🔥 SAME OPTIMIZATION
+            "clip_url": f"{base_url}#t={start},{start+body.clip_duration}"
         })
 
     return {"results": results}
-
-
-@app.get("/scene/videos/{job_id}/clip")
-def scene_clip(job_id: str, start: float, dur: float = 10.0):
-    row = get_job(job_id)
-    if not row:
-        raise HTTPException(status_code=404)
-
-    video_path = download_blob_to_temp(row["blob_name"], suffix=row["ext"])
-
-    tmp_clip = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    cut_clip(video_path, tmp_clip, start, dur)
-
-    clip_blob = f"clips/{job_id}/{int(start)}_{int(dur)}.mp4"
-    blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=clip_blob)
-
-    with open(tmp_clip, "rb") as f:
-        blob_client.upload_blob(f, overwrite=True)
-
-    os.remove(video_path)
-    os.remove(tmp_clip)
-
-    return {"clip_url": get_azure_sas_url(clip_blob)}
 
 
 # -------------------- Health --------------------
