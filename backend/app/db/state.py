@@ -23,7 +23,9 @@ def init_db() -> None:
         job_id TEXT PRIMARY KEY,
         mode TEXT NOT NULL,             -- 'audio' or 'scene'
         language TEXT,                  -- only for audio jobs
-        model_size TEXT,                -- only for audio jobs
+        model_size TEXT, 
+        ext TEXT,                     -- Added for file extension
+        blob_name TEXT,               -- only for audio jobs
         stage TEXT NOT NULL,
         progress INTEGER NOT NULL,
         error TEXT
@@ -34,18 +36,19 @@ def init_db() -> None:
     cur.close()
     conn.close()
 
-def create_job(job_id: str, mode: str, language: Optional[str] = None, model_size: Optional[str] = None) -> None:
+def create_job(job_id: str, mode: str, language: Optional[str] = None, 
+               model_size: Optional[str] = None, ext: Optional[str] = None, 
+               blob_name: Optional[str] = None) -> None:
     if mode not in ("audio", "scene"):
         raise ValueError("mode must be 'audio' or 'scene'")
 
     conn = _connect()
     cur = conn.cursor()
 
-    # Note: Changed ? to %s for PostgreSQL
     cur.execute("""
-    INSERT INTO jobs (job_id, mode, language, model_size, stage, progress, error)
-    VALUES (%s, %s, %s, %s, %s, %s, NULL);
-    """, (job_id, mode, language, model_size, "UPLOADED", 0))
+    INSERT INTO jobs (job_id, mode, language, model_size, ext, blob_name, stage, progress, error)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NULL);
+    """, (job_id, mode, language, model_size, ext, blob_name, "UPLOADED", 0))
 
     conn.commit()
     cur.close()

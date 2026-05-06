@@ -13,7 +13,7 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPerm
 
 # Your services
 from app.db.state import init_db, create_job, update_status, get_job
-from app.services.audio.ffmpeg_utils import extract_audio_wav, cut_clip
+from app.services.audio.ffmpeg_utils import extract_audio_wav, optimize_video_faststart
 from app.services.audio.transcribe_fw import transcribe_audio
 from app.services.audio.transcript_store import save_transcript, load_transcript
 from app.services.video.scene_index import build_scene_index
@@ -61,46 +61,54 @@ def get_azure_sas_url(blob_name: str):
     return f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob_name}?{sas_token}"
 
 
-async def upload_to_azure(file: UploadFile, blob_name: str):
+def upload_file_to_azure(file_path: str, blob_name: str):
+    """Uploads a local file from the disk directly to Azure."""
     blob_client = blob_service_client.get_blob_client(
         container=CONTAINER_NAME,
         blob=blob_name
     )
-    blob_client.upload_blob(file.file, overwrite=True)
-    await file.seek(0)
+    with open(file_path, "rb") as data:
+        blob_client.upload_blob(data, overwrite=True)
 
 
 # -------------------- Background Tasks --------------------
 
-def process_audio(job_id: str):
+def process_audio(job_id: str, local_video_path: str):
+    # Initialize these as None so finally block doesn't crash if it fails early
+    audio_path = None 
+    
     try:
         row = get_job(job_id)
         if not row or row["mode"] != "audio":
             return
 
-        blob_name = row["blob_name"]
-        video_url = get_azure_sas_url(blob_name)
-
+        # STAGE 1: Extract Audio
         update_status(job_id, "EXTRACT_AUDIO", 30)
-
-        # temp file ONLY for extracted wav (not full video)
         audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
 
-        # 🔥 IMPORTANT: extract directly from URL
-        extract_audio_wav(video_url, audio_path)
+        # 🔥 SPEED FIX: Extracting from the local /tmp file is nearly instant
+        extract_audio_wav(local_video_path, audio_path)
 
+        # STAGE 2: Transcribe
         update_status(job_id, "TRANSCRIBE", 70)
         transcript = transcribe_audio(audio_path, row["language"], row["model_size"])
 
+        # STAGE 3: Save results
         update_status(job_id, "SAVE_TRANSCRIPT", 90)
         save_transcript(job_id, transcript)
-
-        os.remove(audio_path)
 
         update_status(job_id, "READY_AUDIO", 100)
 
     except Exception as e:
+        print(f"Error in process_audio: {e}")
         update_status(job_id, "FAILED_AUDIO", 0, str(e))
+        
+    finally:
+        # 🔥 STORAGE FIX: Clean up Hugging Face /tmp directory
+        if audio_path and os.path.exists(audio_path):
+            os.remove(audio_path)
+        if local_video_path and os.path.exists(local_video_path):
+            os.remove(local_video_path)
 
 
 def process_scene(job_id: str):
@@ -167,14 +175,35 @@ class SceneSearchRequest(BaseModel):
 async def upload_audio_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     job_id = str(uuid.uuid4())
     ext = Path(file.filename).suffix.lower() or ".mp4"
-
     blob_name = f"uploads/{job_id}{ext}"
-    await upload_to_azure(file, blob_name)
 
+    # 1. Save the raw upload to the Hugging Face /tmp directory
+    raw_fd, raw_path = tempfile.mkstemp(suffix=ext)
+    with os.fdopen(raw_fd, "wb") as buffer:
+        buffer.write(await file.read())
+
+    # 2. Optimize the video for instant web playback
+    opt_fd, opt_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(opt_fd) 
+    
+    try:
+        optimize_video_faststart(raw_path, opt_path)
+        os.remove(raw_path) # Delete raw immediately to save disk space
+        final_local_path = opt_path
+    except Exception as e:
+        print(f"Optimization failed, using original: {e}")
+        os.remove(opt_path)
+        final_local_path = raw_path
+
+    # 3. Call your clean helper function!
+    upload_file_to_azure(final_local_path, blob_name)
+
+    # 4. Create the DB record
     create_job(job_id=job_id, mode="audio", language="en", model_size="small",
                ext=ext, blob_name=blob_name)
 
-    background_tasks.add_task(process_audio, job_id)
+    # 5. Pass the local path to the background task
+    background_tasks.add_task(process_audio, job_id, final_local_path)
 
     return {"job_id": job_id}
 
@@ -196,33 +225,75 @@ def audio_search(job_id: str, body: AudioSearchRequest):
     for seg in segments:
         if body.query.lower() in seg["text"].lower():
             start = float(seg["start"])
-
             results.append({
                 "start": start,
                 "timestamp": convert_sec_to_hhmmss(start),
-                # 🔥 INSTANT CLIP (NO FFMPEG)
+                "text": seg["text"],
                 "clip_url": f"{base_url}#t={start},{start+body.clip_duration}"
             })
 
-    return {"results": results[:body.top_k]}
+    best = results[0] if results else None
+    alternates = results[1:] if len(results) > 1 else []
+
+    return {
+        "best": best,
+        "alternates": alternates
+    }
+
+@app.get("/audio/videos/{job_id}/status")
+def audio_status(job_id: str):
+    row = get_job(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "stage": row.get("stage"),
+        "progress": row.get("progress", 0),
+        "ready": row.get("stage") == "READY_AUDIO",
+        "error": row.get("error")
+    }
 
 
 # -------------------- SCENE --------------------
+
+import tempfile
+import os
 
 @app.post("/scene/videos")
 async def upload_scene_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     job_id = str(uuid.uuid4())
     ext = Path(file.filename).suffix.lower() or ".mp4"
-
     blob_name = f"uploads/{job_id}{ext}"
-    await upload_to_azure(file, blob_name)
 
+    # 1. Save the incoming stream to a local temp file
+    raw_fd, raw_path = tempfile.mkstemp(suffix=ext)
+    with os.fdopen(raw_fd, "wb") as buffer:
+        buffer.write(await file.read())
+
+    # 2. Optimize for web streaming (Moves metadata to the front)
+    opt_fd, opt_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(opt_fd) 
+    
+    try:
+        # Assuming you added this to ffmpeg_utils as discussed
+        optimize_video_faststart(raw_path, opt_path)
+        os.remove(raw_path) # Delete the raw file immediately
+        final_local_path = opt_path
+    except Exception as e:
+        print(f"Optimization failed: {e}")
+        final_local_path = raw_path
+
+    # 3. Upload the OPTIMIZED local file to Azure
+    # This now matches your helper function's signature
+    upload_file_to_azure(final_local_path, blob_name)
+
+    # 4. Create the DB record
     create_job(job_id=job_id, mode="scene", ext=ext, blob_name=blob_name)
 
-    background_tasks.add_task(process_scene, job_id)
+    # 5. Pass the local path to background task (to avoid re-downloading)
+    background_tasks.add_task(process_scene, job_id, final_local_path)
 
     return {"job_id": job_id}
-
 
 @app.post("/scene/videos/{job_id}/search")
 def scene_search_endpoint(job_id: str, body: SceneSearchRequest):
@@ -245,6 +316,19 @@ def scene_search_endpoint(job_id: str, body: SceneSearchRequest):
         })
 
     return {"results": results}
+
+@app.get("/scene/videos/{job_id}/status")
+def scene_status(job_id: str):
+    row = get_job(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "stage": row.get("stage"),
+        "progress": row.get("progress", 0),
+        "ready": row.get("stage") == "READY_SCENE",
+        "error": row.get("error")
+    }
 
 
 # -------------------- Health --------------------

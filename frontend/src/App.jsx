@@ -181,8 +181,8 @@ export default function App() {
         return;
       }
 
-      const absoluteClipUrl = `${API_BASE}${bestRes.clip_url}${bestRes.clip_url.includes("?") ? "&" : "?"}t=${Date.now()}`;
-      setClipUrl(absoluteClipUrl);
+      
+      setClipUrl(bestRes.clip_url);
       setStatusMsg(`Jumped to ${bestRes.timestamp || hhmmss(bestRes.start)}.`);
     } catch (e) {
       setError(e?.response?.data?.detail || e.message || "Search failed");
@@ -326,7 +326,7 @@ export default function App() {
           {best && (
             <div className="resultContainer animate-up">
               <div className="videoWrapper">
-                 <video className="mainVideo" controls src={clipUrl} autoPlay />
+                 <video key={clipUrl} className="mainVideo" controls src={clipUrl} autoPlay />
                  <div className="timestampOverlay">{best.timestamp || hhmmss(best.start)}</div>
               </div>
               

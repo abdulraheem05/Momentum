@@ -6,12 +6,25 @@ def run_ffmpeg(args: list[str]) -> None:
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or "ffmpeg failed")
 
-def extract_audio_wav(video_url: str, audio_out: str) -> None:
+def extract_audio_wav(input_path: str, audio_out: str) -> None:
+    """Extracts audio from a local path or URL."""
     run_ffmpeg([
-        "-i", video_url,
+        "-i", input_path,
         "-vn",
         "-ac", "1",
         "-ar", "16000",
         "-f", "wav",
         audio_out
+    ])
+
+def optimize_video_faststart(input_path: str, output_path: str) -> None:
+    """
+    Moves metadata to the front of the file. 
+    This fixes the 'stuck' video issue in the browser.
+    """
+    run_ffmpeg([
+        "-i", input_path,
+        "-c", "copy",          # Don't re-encode, just copy (fast!)
+        "-movflags", "+faststart", 
+        output_path
     ])
