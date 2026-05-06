@@ -1,29 +1,49 @@
-import subprocess
-from pathlib import Path
+import cv2
+import os
+from typing import Generator, List
 
-def extract_frames(
-        video_url: str,
-        frame_out: Path,
-        every_n_sec: int = 3,
-        width: int = 320,
-) -> None:
-    frame_out.mkdir(parents=True, exist_ok=True)
-    out_pattern = str(frame_out/"frame_%06d.jpg")
+TMP_DIR = "/tmp/momentum_frames"
 
-    vf = f"fps=1/{every_n_sec}, scale={width}:-1"
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-hide_banner", "-loglevel", "error",
-        "-i", video_url,
-        "-vf", vf,
-        "-q:v", "2",
-        out_pattern
-    ]
+# app/services/video/frames.py
 
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+def extract_frames_in_batches(video_path, job_id, batch_size=16, frame_interval=4.0):
+    # Create a unique folder for this specific job
+    job_dir = os.path.join(TMP_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
 
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or "ffmpeg frame extraction failed")
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps
     
+    batch = []
+    saved_count = 0
     
+    # Calculate exact timestamps to extract
+    import numpy as np
+    timestamps = np.arange(0, duration, frame_interval)
+
+    for ts in timestamps:
+        frame_idx = int(ts * fps)
+        # FAST SEEK: Jump directly to the frame instead of reading through the whole file
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret: break
+
+        # RESIZE: CLIP only needs 224x224. This saves massive Disk I/O time.
+        small_frame = cv2.resize(frame, (224, 224))
+        
+        file_path = os.path.join(job_dir, f"frame_{saved_count}.jpg")
+        cv2.imwrite(file_path, small_frame)
+
+        batch.append({"path": file_path, "timestamp": float(ts)})
+        saved_count += 1
+
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+
+    if batch: yield batch
+    cap.release()
+    # Cleanup directory after generator is exhausted happens in scene_index.py

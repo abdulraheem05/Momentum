@@ -1,35 +1,21 @@
-from app.core.paths import INDEX_FRAMES_DIR
-from app.services.video.faiss_index import load_index, load_json
-from app.services.video.clip_embed import embed_text
+from app.services.vector_store import query
+from app.services.video.clip_embed import get_text_embedding
 
-def search_scene(
-        video_id: str,
-        query: str,
-        top_k: int = 3
-) -> list[dict]:
-    
-    index_path = INDEX_FRAMES_DIR/f"{video_id}.faiss"
-    json_path = INDEX_FRAMES_DIR/f"{video_id}.json"
 
-    if not index_path or not json_path:
-        raise RuntimeError("Scene index not found")
-    
-    index = load_index(index_path)
-    json = load_json(json_path)
-    timestamps = json["timestamps"]
+def search_scene(video_id: str, query_text: str, top_k: int = 3):
+    vector = get_text_embedding(query_text)
 
-    qvec = embed_text(query).reshape(1,-1)
+    results = query(vector, top_k=top_k)
 
-    scores, idxs = index.search(qvec, top_k)
+    hits = []
 
-    out = []
-
-    for score, id in zip(scores[0], idxs[0]):
-        if id < 0:
+    for match in results["matches"]:
+        if match["metadata"]["video_id"] != video_id:
             continue
 
-        out.append({"score":float(score) , "start": float(timestamps[id])})
+        hits.append({
+            "start": match["metadata"]["timestamp"],
+            "score": match["score"]
+        })
 
-    return out
-
-
+    return hits

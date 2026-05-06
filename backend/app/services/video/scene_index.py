@@ -1,46 +1,24 @@
-import shutil
-from pathlib import Path
+import os
+from app.services.video.frames import extract_frames_in_batches
+from app.services.video.clip_embed import get_batch_embeddings
+from app.services.vector_store import upsert_batch
 
-from app.core.paths import FRAMES_TMP_DIR, INDEX_FRAMES_DIR
-from app.services.video.frames import extract_frames
-from app.services.video.clip_embed import embed_images_batched
-from app.services.video.faiss_index import build_index_ip, save_index, save_json
 
-def build_scene_index(
-        video_id: str,
-        video_url: str,
-        every_n_seconds: int,
-        resize_width: int = 320,
-        batch_size: int = 64
-) -> None:
+# app/services/video/scene_index.py
+
+def process_video(video_path: str, video_id: str):
+    # Pass video_id here to use the job-specific directory
+    for batch in extract_frames_in_batches(video_path, video_id, batch_size=16):
+        embeddings_batch = get_batch_embeddings(batch)
+        upsert_batch(video_id, embeddings_batch)
+        
+        # Cleanup batch files immediately
+        for item in batch:
+            if os.path.exists(item["path"]):
+                os.remove(item["path"])
     
-    tmp_dir = FRAMES_TMP_DIR / video_id
-
-    extract_frames(
-        video_url=video_url, 
-        frame_out=tmp_dir,
-        every_n_sec=every_n_seconds,
-        width=resize_width
-    )
-
-    image_paths = sorted([str(p) for p in tmp_dir.glob("frame_*.jpg")])
-
-    vectors = embed_images_batched(image_paths, batch_size=batch_size)
-
-    index = build_index_ip(vectors)
-
-    index_path = INDEX_FRAMES_DIR/f"{video_id}.faiss"
-    json_path = INDEX_FRAMES_DIR/f"{video_id}.json"
-
-    timestamps = [i * every_n_seconds for i in range(len(image_paths))]
-
-    save_index(index, index_path)
-
-    save_json({
-        "every_n_seconds": every_n_seconds,
-        "resize_width": resize_width,
-        "count": len(image_paths),
-        "timestamps": timestamps
-    }, json_path)
-
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    # Final cleanup of the job directory
+    job_dir = os.path.join("/tmp/momentum_frames", video_id)
+    if os.path.exists(job_dir):
+        import shutil
+        shutil.rmtree(job_dir)

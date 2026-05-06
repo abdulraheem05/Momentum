@@ -170,20 +170,38 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
       });
 
-      const bestRes = res.data.best;
-      const altRes = res.data.alternates || [];
+      if (mode === "scene") {
+        const results = res.data.results || [];
 
-      setBest(bestRes || null);
-      setAlternates(altRes);
+        const bestRes = results[0] || null;
+        const altRes = results.slice(1);
 
-      if (!bestRes) {
-        setStatusMsg("No matches found. Try a clearer query.");
-        return;
+        setBest(bestRes);
+        setAlternates(altRes);
+
+        if (!bestRes) {
+          setStatusMsg("No matches found.");
+          return;
+        }
+
+        setClipUrl(bestRes.clip_url);
+        setStatusMsg(`Jumped to ${bestRes.timestamp || hhmmss(bestRes.start)}.`);
+      } else {
+        // AUDIO (your existing logic)
+        const bestRes = res.data.best;
+        const altRes = res.data.alternates || [];
+
+        setBest(bestRes || null);
+        setAlternates(altRes);
+
+        if (!bestRes) {
+          setStatusMsg("No matches found. Try a clearer query.");
+          return;
+        }
+
+        setClipUrl(bestRes.clip_url);
+        setStatusMsg(`Jumped to ${bestRes.timestamp || hhmmss(bestRes.start)}.`);
       }
-
-      
-      setClipUrl(bestRes.clip_url);
-      setStatusMsg(`Jumped to ${bestRes.timestamp || hhmmss(bestRes.start)}.`);
     } catch (e) {
       setError(e?.response?.data?.detail || e.message || "Search failed");
     } finally {

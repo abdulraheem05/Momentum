@@ -16,7 +16,7 @@ from app.db.state import init_db, create_job, update_status, get_job
 from app.services.audio.ffmpeg_utils import extract_audio_wav, optimize_video_faststart
 from app.services.audio.transcribe_fw import transcribe_audio
 from app.services.audio.transcript_store import save_transcript, load_transcript
-from app.services.video.scene_index import build_scene_index
+from app.services.video.scene_index import process_video
 from app.services.video.scene_search import search_scene
 
 load_dotenv()
@@ -68,7 +68,14 @@ def upload_file_to_azure(file_path: str, blob_name: str):
         blob=blob_name
     )
     with open(file_path, "rb") as data:
-        blob_client.upload_blob(data, overwrite=True)
+        blob_client.upload_blob(
+            data,
+            overwrite=True,
+            max_concurrency=4,
+            length=os.path.getsize(file_path),
+            connection_timeout=600,  # Wait up to 10 minutes to connect
+            read_timeout=600
+        )
 
 
 # -------------------- Background Tasks --------------------
@@ -111,48 +118,32 @@ def process_audio(job_id: str, local_video_path: str):
             os.remove(local_video_path)
 
 
-def process_scene(job_id: str):
+def process_scene(job_id: str, local_video_path: str, blob_name: str):
+    final_path = local_video_path
     try:
-        row = get_job(job_id)
-        if not row or row["mode"] != "scene":
-            return
+        # STAGE 1: Optimize and Upload (Backgrounded)
+        update_status(job_id, "OPTIMIZING", 10)
+        opt_path = local_video_path + ".opt.mp4"
+        try:
+            optimize_video_faststart(local_video_path, opt_path)
+            final_path = opt_path
+        except:
+            pass
+            
+        update_status(job_id, "UPLOADING", 30)
+        upload_file_to_azure(final_path, blob_name)
 
-        blob_name = row["blob_name"]
-        video_url = get_azure_sas_url(blob_name)
-
-        update_status(job_id, "SCENE_INDEX", 50)
-
-        # 🔥 Pass URL instead of file path
-        build_scene_index(
-            video_id=job_id,
-            video_url=video_url,
-            every_n_seconds=3,
-            resize_width=320,
-            batch_size=64,
-        )
+        # STAGE 2: Indexing
+        update_status(job_id, "SCENE_INDEX", 60)
+        process_video(video_path=final_path, video_id=job_id)
 
         update_status(job_id, "READY_SCENE", 100)
-
     except Exception as e:
         update_status(job_id, "FAILED_SCENE", 0, str(e))
-
-
-def process_scene_shard(job_id: str, start_sec: int, end_sec: int):
-    try:
-        row = get_job(job_id)
-
-        video_url = get_azure_sas_url(row["blob_name"])
-
-        build_scene_index(
-            video_id=job_id,
-            video_url=video_url,
-            start_time=start_sec,
-            end_time=end_sec,
-            every_n_seconds=3,
-        )
-
-    except Exception as e:
-        print(f"Shard failed: {e}")
+    finally:
+        # Cleanup
+        for p in [local_video_path, opt_path]:
+            if os.path.exists(p): os.remove(p)
 
 
 # -------------------- Request Models --------------------
@@ -265,33 +256,16 @@ async def upload_scene_video(background_tasks: BackgroundTasks, file: UploadFile
     ext = Path(file.filename).suffix.lower() or ".mp4"
     blob_name = f"uploads/{job_id}{ext}"
 
-    # 1. Save the incoming stream to a local temp file
+    # 1. ONLY save the file locally
     raw_fd, raw_path = tempfile.mkstemp(suffix=ext)
     with os.fdopen(raw_fd, "wb") as buffer:
         buffer.write(await file.read())
 
-    # 2. Optimize for web streaming (Moves metadata to the front)
-    opt_fd, opt_path = tempfile.mkstemp(suffix=".mp4")
-    os.close(opt_fd) 
-    
-    try:
-        # Assuming you added this to ffmpeg_utils as discussed
-        optimize_video_faststart(raw_path, opt_path)
-        os.remove(raw_path) # Delete the raw file immediately
-        final_local_path = opt_path
-    except Exception as e:
-        print(f"Optimization failed: {e}")
-        final_local_path = raw_path
-
-    # 3. Upload the OPTIMIZED local file to Azure
-    # This now matches your helper function's signature
-    upload_file_to_azure(final_local_path, blob_name)
-
-    # 4. Create the DB record
+    # 2. Create DB record immediately
     create_job(job_id=job_id, mode="scene", ext=ext, blob_name=blob_name)
 
-    # 5. Pass the local path to background task (to avoid re-downloading)
-    background_tasks.add_task(process_scene, job_id, final_local_path)
+    # 3. Hand everything off to the background task
+    background_tasks.add_task(process_scene, job_id, raw_path, blob_name)
 
     return {"job_id": job_id}
 
@@ -311,7 +285,7 @@ def scene_search_endpoint(job_id: str, body: SceneSearchRequest):
         results.append({
             "start": start,
             "timestamp": convert_sec_to_hhmmss(start),
-            # 🔥 SAME OPTIMIZATION
+            "score": h["score"], 
             "clip_url": f"{base_url}#t={start},{start+body.clip_duration}"
         })
 
