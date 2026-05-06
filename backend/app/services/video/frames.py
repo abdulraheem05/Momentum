@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 def extract_frames(
-        video_path: Path,
+        video_url: str,
         frame_out: Path,
         every_n_sec: int = 3,
         width: int = 320,
@@ -15,7 +15,7 @@ def extract_frames(
     cmd = [
         "ffmpeg", "-y",
         "-hide_banner", "-loglevel", "error",
-        "-i", str(video_path),
+        "-i", video_url,
         "-vf", vf,
         "-q:v", "2",
         out_pattern

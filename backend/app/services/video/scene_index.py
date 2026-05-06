@@ -8,7 +8,7 @@ from app.services.video.faiss_index import build_index_ip, save_index, save_json
 
 def build_scene_index(
         video_id: str,
-        video_path: str,
+        video_url: str,
         every_n_seconds: int,
         resize_width: int = 320,
         batch_size: int = 64
@@ -17,7 +17,7 @@ def build_scene_index(
     tmp_dir = FRAMES_TMP_DIR / video_id
 
     extract_frames(
-        video_path=video_path,
+        video_url=video_url, 
         frame_out=tmp_dir,
         every_n_sec=every_n_seconds,
         width=resize_width
