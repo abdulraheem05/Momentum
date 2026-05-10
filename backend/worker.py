@@ -267,3 +267,88 @@ def push_scene_embedding(
             }
         }
     ])
+
+
+@app.function(
+    image=image,
+    secrets=secrets,
+    timeout=60 * 30
+)
+def process_audio(job_id, video_path):
+
+    audio_path = "/tmp/audio.mp3"
+
+    subprocess.run([
+        "ffmpeg",
+        "-i",
+        video_path,
+        "-vn",
+        "-acodec",
+        "mp3",
+        audio_path
+    ])
+
+    transcribe_audio(job_id, audio_path)
+
+
+def transcribe_audio(job_id, audio_path):
+
+    from groq import Groq
+
+    client = Groq(
+        api_key=os.getenv("GROQ_API_KEY")
+    )
+
+    with open(audio_path, "rb") as file:
+
+        transcription = client.audio.transcriptions.create(
+            file=file,
+            model="whisper-large-v3-turbo",
+            response_format="verbose_json"
+        )
+
+    save_transcript(
+        job_id,
+        transcription.text
+    )
+
+def save_transcript(job_id, text):
+
+    from azure.storage.blob import BlobServiceClient
+
+    blob_service = BlobServiceClient.from_connection_string(
+        os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+    )
+
+    blob_client = blob_service.get_blob_client(
+        container="transcripts",
+        blob=f"{job_id}.json"
+    )
+
+    payload = json.dumps({
+        "text": text
+    })
+
+    blob_client.upload_blob(
+        payload,
+        overwrite=True
+    )
+
+def update_job_status(job_id, status):
+
+    from supabase import create_client
+
+    supabase = create_client(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_KEY")
+    )
+
+    (
+        supabase
+        .table("jobs")
+        .update({
+            "status": status
+        })
+        .eq("id", job_id)
+        .execute()
+    )
