@@ -3,8 +3,21 @@ import uuid
 import json
 import subprocess
 from pathlib import Path
-
+import requests
 import modal
+
+from transformers import CLIPProcessor, CLIPModel
+from PIL import Image
+import torch
+
+model = CLIPModel.from_pretrained(
+    "openai/clip-vit-base-patch32"
+)
+
+processor = CLIPProcessor.from_pretrained(
+    "openai/clip-vit-base-patch32"
+)
+
 
 app = modal.App("momentum-worker")
 
@@ -43,53 +56,111 @@ secrets = [
 )
 def process_video(job_id, payload):
 
+    import requests
+
     source_type = payload["source_type"]
     source_url = payload["source_url"]
     mode = payload["mode"]
+
+    update_job_status(job_id, "DOWNLOADING")
 
     os.makedirs("/tmp/video", exist_ok=True)
 
     local_video = "/tmp/video/input.mp4"
 
-    if source_type == "youtube":
+    try:
 
-        subprocess.run([
-            "yt-dlp",
-            "-f",
-            "mp4",
-            "-o",
-            local_video,
-            source_url
-        ])
+        # YOUTUBE DOWNLOAD
+        if source_type == "youtube":
 
-    else:
+            subprocess.run(
+                [
+                    "yt-dlp",
+                    "-f",
+                    "mp4",
+                    "-o",
+                    local_video,
+                    source_url
+                ],
+                check=True
+            )
 
-        subprocess.run([
-            "ffmpeg",
-            "-i",
-            source_url,
-            "-c",
-            "copy",
-            local_video
-        ])
+        # AZURE VIDEO DOWNLOAD
+        else:
 
-    if mode in ["video", "both"]:
+            response = requests.get(
+                source_url,
+                stream=True
+            )
 
-        chunks = split_video_chunks(local_video)
+            response.raise_for_status()
 
-        process_chunk.map([
-            {
-                "job_id": job_id,
-                "chunk_path": chunk,
-                "offset": idx * 600
-            }
-            for idx, chunk in enumerate(chunks)
-        ])
+            with open(local_video, "wb") as file:
+                for chunk in response.iter_content(
+                    chunk_size=1024 * 1024
+                ):
+                    if chunk:
+                        file.write(chunk)
 
-    if mode in ["audio", "both"]:
-        process_audio(job_id, local_video)
+        # VIDEO PIPELINE
+        if mode in ["video", "both"]:
 
-    update_job_status(job_id, "READY")
+            update_job_status(
+                job_id,
+                "PROCESSING_VIDEO"
+            )
+
+            chunks = split_video_chunks(
+                local_video
+            )
+
+            processor = VideoProcessor()
+
+            processor.process_chunk.map([
+                {
+                    "job_id": job_id,
+                    "chunk_path": chunk,
+                    "offset": idx * 600
+                }
+                for idx, chunk in enumerate(chunks)
+            ])
+
+        # AUDIO PIPELINE
+        if mode in ["audio", "both"]:
+
+            update_job_status(
+                job_id,
+                "PROCESSING_AUDIO"
+            )
+
+            process_audio(
+                job_id,
+                local_video
+            )
+
+        update_job_status(
+            job_id,
+            "READY"
+        )
+
+    except Exception as e:
+
+        print("PROCESS_VIDEO_ERROR:", str(e))
+
+        update_job_status(
+            job_id,
+            "FAILED"
+        )
+
+        raise e
+
+    finally:
+
+        try:
+            if os.path.exists(local_video):
+                os.remove(local_video)
+        except:
+            pass
 
 
 def split_video_chunks(video_path):
@@ -120,49 +191,99 @@ def split_video_chunks(video_path):
         for file in os.listdir(output_dir)
     ])
 
-
-@app.function(
+@app.cls(
     image=image,
     secrets=secrets,
     gpu="H100",
     timeout=60 * 30
 )
+class VideoProcessor:
 
-def process_chunk(data):
+    @modal.enter()
+    def load_model(self):
 
-    from scenedetect import detect, ContentDetector
+        from transformers import (
+            CLIPProcessor,
+            CLIPModel
+        )
 
-    chunk_path = data["chunk_path"]
-    offset = data["offset"]
-    job_id = data["job_id"]
+        import torch
 
-    scenes = detect(
-        chunk_path,
-        ContentDetector(threshold=27.0)
-    )
+        self.device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "cpu"
+        )
 
-    for idx, scene in enumerate(scenes):
+        self.model = CLIPModel.from_pretrained(
+            "openai/clip-vit-base-patch32"
+        ).to(self.device)
 
-        start_time = scene[0].get_seconds()
+        self.processor = CLIPProcessor.from_pretrained(
+            "openai/clip-vit-base-patch32"
+        )
 
-        global_timestamp = offset + start_time
+    @modal.method()
+    def process_chunk(self, data):
 
-        frame_path = extract_frame(
+        from scenedetect import (
+            detect,
+            ContentDetector
+        )
+
+        from PIL import Image
+
+        import torch
+
+        chunk_path = data["chunk_path"]
+        offset = data["offset"]
+        job_id = data["job_id"]
+
+        scenes = detect(
             chunk_path,
-            start_time,
-            idx
+            ContentDetector(threshold=27.0)
         )
 
-        thumbnail_url = upload_thumbnail(frame_path)
+        for idx, scene in enumerate(scenes):
 
-        vector = generate_clip_embedding(frame_path)
+            start_time = scene[0].get_seconds()
 
-        push_scene_embedding(
-            job_id,
-            vector,
-            global_timestamp,
-            thumbnail_url
-        )
+            global_timestamp = (
+                offset + start_time
+            )
+
+            frame_path = extract_frame(
+                chunk_path,
+                start_time,
+                idx
+            )
+
+            thumbnail_url = upload_thumbnail(
+                frame_path
+            )
+
+            image = Image.open(frame_path)
+
+            inputs = self.processor(
+                images=image,
+                return_tensors="pt"
+            ).to(self.device)
+
+            with torch.no_grad():
+
+                features = (
+                    self.model
+                    .get_image_features(**inputs)
+                )
+
+            vector = features[0].cpu().tolist()
+
+            push_scene_embedding(
+                job_id,
+                vector,
+                global_timestamp,
+                thumbnail_url
+            )
 
 
 def extract_frame(video_path, timestamp, idx):
@@ -212,31 +333,7 @@ def upload_thumbnail(frame_path):
     return blob_client.url
 
 
-def generate_clip_embedding(image_path):
 
-    from transformers import CLIPProcessor, CLIPModel
-    from PIL import Image
-    import torch
-
-    model = CLIPModel.from_pretrained(
-        "openai/clip-vit-base-patch32"
-    )
-
-    processor = CLIPProcessor.from_pretrained(
-        "openai/clip-vit-base-patch32"
-    )
-
-    image = Image.open(image_path)
-
-    inputs = processor(
-        images=image,
-        return_tensors="pt"
-    )
-
-    with torch.no_grad():
-        features = model.get_image_features(**inputs)
-
-    return features[0].tolist()
 
 
 def push_scene_embedding(
@@ -309,10 +406,10 @@ def transcribe_audio(job_id, audio_path):
 
     save_transcript(
         job_id,
-        transcription.text
+        transcription
     )
 
-def save_transcript(job_id, text):
+def save_transcript(job_id, transcription):
 
     from azure.storage.blob import BlobServiceClient
 
@@ -326,7 +423,7 @@ def save_transcript(job_id, text):
     )
 
     payload = json.dumps({
-        "text": text
+        "segments": transcription.segments
     })
 
     blob_client.upload_blob(
