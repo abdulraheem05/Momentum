@@ -321,7 +321,7 @@ def save_transcript(job_id, text):
     )
 
     blob_client = blob_service.get_blob_client(
-        container="transcripts",
+        container = os.getenv("AZURE_RESULTS_CONTAINER"),
         blob=f"{job_id}.json"
     )
 
