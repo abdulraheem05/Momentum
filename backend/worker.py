@@ -163,3 +163,107 @@ def process_chunk(data):
             global_timestamp,
             thumbnail_url
         )
+
+
+def extract_frame(video_path, timestamp, idx):
+
+    output = f"/tmp/frame_{idx}.jpg"
+
+    subprocess.run([
+        "ffmpeg",
+        "-ss",
+        str(timestamp),
+        "-i",
+        video_path,
+        "-frames:v",
+        "1",
+        output
+    ])
+
+    return output
+
+
+def upload_thumbnail(frame_path):
+
+    from azure.storage.blob import BlobServiceClient
+
+    connection_string = os.getenv(
+        "AZURE_STORAGE_CONNECTION_STRING"
+    )
+
+    container = os.getenv(
+        "AZURE_THUMBNAIL_CONTAINER"
+    )
+
+    blob_service = BlobServiceClient.from_connection_string(
+        connection_string
+    )
+
+    blob_name = f"{uuid.uuid4()}.jpg"
+
+    blob_client = blob_service.get_blob_client(
+        container=container,
+        blob=blob_name
+    )
+
+    with open(frame_path, "rb") as data:
+        blob_client.upload_blob(data)
+
+    return blob_client.url
+
+
+def generate_clip_embedding(image_path):
+
+    from transformers import CLIPProcessor, CLIPModel
+    from PIL import Image
+    import torch
+
+    model = CLIPModel.from_pretrained(
+        "openai/clip-vit-base-patch32"
+    )
+
+    processor = CLIPProcessor.from_pretrained(
+        "openai/clip-vit-base-patch32"
+    )
+
+    image = Image.open(image_path)
+
+    inputs = processor(
+        images=image,
+        return_tensors="pt"
+    )
+
+    with torch.no_grad():
+        features = model.get_image_features(**inputs)
+
+    return features[0].tolist()
+
+
+def push_scene_embedding(
+    job_id,
+    vector,
+    timestamp,
+    thumbnail_url
+):
+
+    from pinecone import Pinecone
+
+    pc = Pinecone(
+        api_key=os.getenv("PINECONE_API_KEY")
+    )
+
+    index = pc.Index(
+        os.getenv("PINECONE_INDEX")
+    )
+
+    index.upsert([
+        {
+            "id": str(uuid.uuid4()),
+            "values": vector,
+            "metadata": {
+                "job_id": job_id,
+                "timestamp": timestamp,
+                "thumbnail_url": thumbnail_url
+            }
+        }
+    ])
