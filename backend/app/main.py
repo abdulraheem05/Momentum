@@ -1,7 +1,20 @@
 import uuid
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.services.search.scene_search import search_scenes
+from app.services.search.audio_search import search_audio
+
+from app.services.generate_clips import (
+    generate_clip,
+    upload_result_clip
+)
+
+from app.services.history import (
+    save_history,
+    get_history
+)
 
 from app.models.schemas import (
     UploadCompleteRequest,
@@ -9,13 +22,13 @@ from app.models.schemas import (
     AudioSearchRequest
 )
 
-from app.services.azure_sas import generate_upload_sas
-from app.services.auth import get_current_user
-from app.services.modal_trigger import trigger_worker
-from app.services.quota import (
-    check_quota,
-    increment_usage
+
+from app.services.cleanup import (
+    delete_original_video
 )
+
+from app.services.azure_sas import generate_upload_sas
+from app.services.modal_trigger import trigger_worker
 
 from app.db.supabase import supabase
 
@@ -36,21 +49,15 @@ async def home():
 
 
 @app.get("/upload/sas-token")
-async def get_sas_token(
-    current_user=Depends(get_current_user)
-):
-    await check_quota(current_user["sub"])
+async def get_sas_token():
 
     return generate_upload_sas()
 
 
 @app.post("/jobs/create")
 async def create_job(
-    request: UploadCompleteRequest,
-    current_user=Depends(get_current_user)
+    request: UploadCompleteRequest
 ):
-
-    await check_quota(current_user["sub"])
 
     job_id = str(uuid.uuid4())
 
@@ -61,7 +68,6 @@ async def create_job(
         .table("jobs")
         .insert({
             "id": job_id,
-            "user_id": current_user["sub"],
             "source_type": request.source_type,
             "source_url": source_url,
             "mode": request.mode,
@@ -74,12 +80,9 @@ async def create_job(
         "source_type": request.source_type,
         "source_url": source_url,
         "mode": request.mode,
-        "user_id": current_user["sub"]
     }
 
     trigger_worker(job_id, payload)
-
-    await increment_usage(current_user["sub"])
 
     return {
         "job_id": job_id,
@@ -88,10 +91,7 @@ async def create_job(
 
 
 @app.get("/jobs/{job_id}")
-async def get_job_status(
-    job_id: str,
-    current_user=Depends(get_current_user)
-):
+async def get_job_status(job_id: str):
 
     response = (
         supabase
@@ -102,3 +102,150 @@ async def get_job_status(
     )
 
     return response.data[0]
+
+@app.post("/search/scene")
+async def scene_search(request: SceneSearchRequest):
+
+    results = search_scenes(
+        request.job_id,
+        request.query
+    )
+
+    response = []
+
+    job_response = (
+        supabase
+        .table("jobs")
+        .select("*")
+        .eq("id", request.job_id)
+        .execute()
+    )
+
+    if not job_response.data:
+        raise HTTPException(status_code=404, detail="Job id not found")
+    
+    job = job_response.data[0]
+
+    source_video = job["source_url"]
+
+    for item in results:
+
+        clip_path = generate_clip(
+            source_video,
+            item["timestamp"]
+        )
+
+        clip_url = upload_result_clip(
+            clip_path
+        )
+
+        save_history(
+            request.job_id,
+            request.query,
+            "scene",
+            clip_url,
+            item["thumbnail_url"],
+            item["timestamp"]
+        )
+
+        response.append({
+            "clip_url": clip_url,
+            "thumbnail_url": item["thumbnail_url"],
+            "timestamp": item["timestamp"],
+            "score": item["score"]
+        })
+
+    return response
+
+
+@app.post("/search/audio")
+async def audio_search(request: AudioSearchRequest):
+
+    results = search_audio(
+        request.job_id,
+        request.query
+    )
+
+    response = []
+
+    job_response = (
+        supabase
+        .table("jobs")
+        .select("*")
+        .eq("id", request.job_id)
+        .execute()
+    )
+
+    if not job_response.data:
+        raise HTTPException(status_code=404, detail="Job id not found")
+    
+    job = job_response.data[0]
+
+    source_video = job["source_url"]
+
+    for item in results:
+
+        clip_path = generate_clip(
+            source_video,
+            item["timestamp"]
+        )
+
+        clip_url = upload_result_clip(
+            clip_path
+        )
+
+        thumbnail_url = ""
+
+        save_history(
+            request.job_id,
+            request.query,
+            "audio",
+            clip_url,
+            thumbnail_url,
+            item["timestamp"]
+        )
+
+        response.append({
+            "clip_url": clip_url,
+            "timestamp": item["timestamp"],
+            "score": item["score"]
+        })
+
+    return response
+
+@app.get("/history")
+async def history():
+
+    return get_history()
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+
+    job_response = (
+        supabase
+        .table("jobs")
+        .select("*")
+        .eq("id", job_id)
+        .execute()
+    ).data[0]
+
+    if not job_response:
+        raise HTTPException(status_code=404, detail="Job id not found")
+    
+    job = job_response.data[0]
+
+    if job["source_type"] == "upload":
+        delete_original_video(job["source_url"])
+
+    (
+        supabase
+        .table("jobs")
+        .delete()
+        .eq("id", job_id)
+        .execute()
+    )
+
+    return {
+        "message": "Original movie deleted"
+    }

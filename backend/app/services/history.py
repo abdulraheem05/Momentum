@@ -4,7 +4,6 @@ from app.db.supabase import supabase
 
 
 def save_history(
-    user_id,
     job_id,
     query,
     search_type,
@@ -18,7 +17,6 @@ def save_history(
         .table("search_history")
         .insert({
             "id": str(uuid.uuid4()),
-            "user_id": user_id,
             "job_id": job_id,
             "query": query,
             "search_type": search_type,
@@ -30,13 +28,12 @@ def save_history(
     )
 
 
-def get_history(user_id):
+def get_history():
 
     response = (
         supabase
         .table("search_history")
         .select("*")
-        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .execute()
     )

@@ -1,6 +1,6 @@
 import modal
 
-process_video = modal.Function.lookup(
+process_video = modal.Function.from_name(
     "momentum-worker",
     "process_video"
 )

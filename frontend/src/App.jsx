@@ -2,14 +2,11 @@
 
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { supabase } from "./supabase";
 import "./App.css";
 
 const API = "http://localhost:8000";
 
 export default function App() {
-
-  const [user, setUser] = useState(null);
 
   const [mode, setMode] = useState("both");
 
@@ -37,48 +34,18 @@ export default function App() {
 
   const [history, setHistory] = useState([]);
 
-  useEffect(() => {
-
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user || null);
-    });
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user || null);
-    });
-
-    return () => subscription.unsubscribe();
-
-  }, []);
-
-  const login = async () => {
-
-    await supabase.auth.signInWithOAuth({
-      provider: "google"
-    });
-
-  };
-
-  const logout = async () => {
-
-    await supabase.auth.signOut();
-
-  };
-
   const uploadVideo = async () => {
 
-    if (!user) return;
+    if (!file && !youtubeUrl.trim()) {
+      alert("Please upload a video or paste a YouTube URL.");
+      setUploading(false);
+      return;
+    }
 
     setUploading(true);
 
     try {
-
-      const token = (
-        await supabase.auth.getSession()
-      ).data.session.access_token;
-
+      
       // YOUTUBE FLOW
       if (youtubeUrl.trim()) {
 
@@ -88,11 +55,6 @@ export default function App() {
             source_type: "youtube",
             youtube_url: youtubeUrl,
             mode
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
           }
         );
 
@@ -105,12 +67,7 @@ export default function App() {
 
       // GET SAS TOKEN
       const sas = await axios.get(
-        `${API}/upload/sas-token`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
+        `${API}/upload/sas-token`
       );
 
       // DIRECT AZURE UPLOAD
@@ -141,11 +98,6 @@ export default function App() {
           source_type: "upload",
           blob_url: sas.data.blob_url,
           mode
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
         }
       );
 
@@ -164,54 +116,15 @@ export default function App() {
     }
   };
 
-  const pollJob = async (id) => {
-
-    const token = (
-      await supabase.auth.getSession()
-    ).data.session.access_token;
-
-    const interval = setInterval(async () => {
-
-      const res = await axios.get(
-        `${API}/jobs/${id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-
-      setJobStatus(res.data.status);
-
-      if (res.data.status === "READY") {
-
-        setReady(true);
-
-        clearInterval(interval);
-
-      }
-
-    }, 3000);
-
-  };
-
   const searchScene = async () => {
-
-    const token = (
-      await supabase.auth.getSession()
-    ).data.session.access_token;
 
     const res = await axios.post(
       `${API}/search/scene`,
       {
         job_id: jobId,
         query: sceneQuery
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
       }
+    
     );
 
     setResults(res.data);
@@ -220,20 +133,11 @@ export default function App() {
 
   const searchAudio = async () => {
 
-    const token = (
-      await supabase.auth.getSession()
-    ).data.session.access_token;
-
     const res = await axios.post(
       `${API}/search/audio`,
       {
         job_id: jobId,
         query: audioQuery
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
       }
     );
 
@@ -249,40 +153,7 @@ export default function App() {
 
         <h1>Momentum</h1>
 
-        {
-          user && (
-            <div className="navRight">
-
-              <span>0/5 Uses</span>
-
-              <button onClick={logout}>
-                Logout
-              </button>
-
-            </div>
-          )
-        }
-
       </div>
-
-      {
-        !user && (
-
-          <div className="authBox">
-
-            <h1>AI Video Search</h1>
-
-            <button onClick={login}>
-              Continue with Google
-            </button>
-
-          </div>
-
-        )
-      }
-
-      {
-        user && (
 
           <>
 
@@ -484,10 +355,6 @@ export default function App() {
             }
 
           </>
-
-        )
-      }
-
     </div>
 
   );
