@@ -314,7 +314,7 @@ class ClipService:
                     **inputs
                 )
 
-            vector = features[0].cpu().tolist()
+            vector = features.detach().cpu().reshape(-1).tolist()
 
             push_scene_embedding(
                 job_id=job_id,
@@ -344,7 +344,7 @@ class ClipService:
                 **inputs
             )
 
-        query_vector = features[0].cpu().tolist()
+        query_vector = features.detach().cpu().reshape(-1).tolist()
 
         if len(query_vector) != 512:
             raise ValueError(
