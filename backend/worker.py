@@ -43,6 +43,8 @@ secrets = [
 
 # ============================================================
 # MAIN PROCESS VIDEO FUNCTION
+# This now acts only as the controller.
+# It does NOT pass /tmp file paths between Modal containers.
 # ============================================================
 
 @app.function(
@@ -52,52 +54,13 @@ secrets = [
     timeout=60 * 60
 )
 def process_video(job_id, payload):
-    import requests
 
     source_type = payload["source_type"]
     source_url = payload["source_url"]
     mode = payload["mode"]
 
-    update_job_status(job_id, "DOWNLOADING")
-
-    os.makedirs("/tmp/video", exist_ok=True)
-
-    local_video = "/tmp/video/input.mp4"
-
     try:
-        # -----------------------------
-        # Download YouTube video
-        # -----------------------------
-        if source_type == "youtube":
-            subprocess.run(
-                [
-                    "yt-dlp",
-                    "-f",
-                    "mp4",
-                    "-o",
-                    local_video,
-                    source_url
-                ],
-                check=True
-            )
-
-        # -----------------------------
-        # Download uploaded Azure video
-        # -----------------------------
-        else:
-            response = requests.get(
-                source_url,
-                stream=True
-            )
-
-            response.raise_for_status()
-
-            with open(local_video, "wb") as file:
-                for chunk in response.iter_content(
-                    chunk_size=1024 * 1024
-                ):
-                    if chunk:
-                        file.write(chunk)
+        update_job_status(job_id, "STARTED")
 
         # -----------------------------
         # Video processing
@@ -109,20 +72,13 @@ def process_video(job_id, payload):
                 "PROCESSING_VIDEO"
             )
 
-            chunks = split_video_chunks(
-                local_video
-            )
-
             clip_service = ClipService()
 
-            clip_service.process_chunk.map([
-                {
-                    "job_id": job_id,
-                    "chunk_path": chunk,
-                    "offset": idx * 600
-                }
-                for idx, chunk in enumerate(chunks)
-            ])
+            clip_service.process_video_file.remote(
+                job_id,
+                source_type,
+                source_url
+            )
 
         # -----------------------------
         # Audio processing
@@ -134,9 +90,10 @@ def process_video(job_id, payload):
                 "PROCESSING_AUDIO"
             )
 
-            process_audio.remote(
+            process_audio_from_source.remote(
                 job_id,
-                local_video
+                source_type,
+                source_url
             )
 
         update_job_status(
@@ -154,13 +111,6 @@ def process_video(job_id, payload):
         )
 
         raise e
-
-    finally:
-        try:
-            if os.path.exists(local_video):
-                os.remove(local_video)
-        except Exception:
-            pass
 
 
 # ============================================================
@@ -199,12 +149,59 @@ def split_video_chunks(video_path):
     ])
 
 
+def download_blob_to_file(blob_url, local_path):
+    from azure.storage.blob import BlobServiceClient
+    from urllib.parse import urlparse
+
+    blob_service = BlobServiceClient.from_connection_string(
+        os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+    )
+
+    parsed_url = urlparse(blob_url)
+
+    path_parts = parsed_url.path.lstrip("/").split("/", 1)
+
+    container_name = path_parts[0]
+    blob_name = path_parts[1]
+
+    blob_client = blob_service.get_blob_client(
+        container=container_name,
+        blob=blob_name
+    )
+
+    with open(local_path, "wb") as file:
+        file.write(
+            blob_client.download_blob().readall()
+        )
+
+
+def download_source_video(source_type, source_url, local_video):
+    os.makedirs("/tmp/video", exist_ok=True)
+
+    if source_type == "youtube":
+        subprocess.run(
+            [
+                "yt-dlp",
+                "-f",
+                "mp4",
+                "-o",
+                local_video,
+                source_url
+            ],
+            check=True
+        )
+
+    else:
+        download_blob_to_file(
+            source_url,
+            local_video
+        )
+
+
 # ============================================================
 # SHARED CLIP SERVICE
-# This loads CLIP once per warm Modal container.
-# It is used for BOTH:
-# 1. image/frame embeddings during processing
-# 2. text query embeddings during scene search
+# Downloads video, splits video, processes chunks, and searches.
+# All video /tmp files stay inside this same Modal class container.
 # ============================================================
 
 @app.cls(
@@ -243,13 +240,36 @@ class ClipService:
 
         print("CLIP model loaded.")
 
-    # --------------------------------------------------------
-    # Used during video processing
-    # Creates image embeddings and stores them in Pinecone
-    # --------------------------------------------------------
-
     @modal.method()
-    def process_chunk(self, data):
+    def process_video_file(self, job_id, source_type, source_url):
+        local_video = "/tmp/video/input.mp4"
+
+        try:
+            download_source_video(
+                source_type,
+                source_url,
+                local_video
+            )
+
+            chunks = split_video_chunks(
+                local_video
+            )
+
+            for idx, chunk_path in enumerate(chunks):
+                self.process_chunk_local(
+                    job_id=job_id,
+                    chunk_path=chunk_path,
+                    offset=idx * 600
+                )
+
+        finally:
+            try:
+                if os.path.exists(local_video):
+                    os.remove(local_video)
+            except Exception:
+                pass
+
+    def process_chunk_local(self, job_id, chunk_path, offset):
         from scenedetect import (
             detect,
             ContentDetector
@@ -257,10 +277,6 @@ class ClipService:
 
         from PIL import Image
         import torch
-
-        chunk_path = data["chunk_path"]
-        offset = data["offset"]
-        job_id = data["job_id"]
 
         scenes = detect(
             chunk_path,
@@ -311,11 +327,6 @@ class ClipService:
             except Exception:
                 pass
 
-    # --------------------------------------------------------
-    # Used during scene search
-    # Creates text embedding and searches Pinecone
-    # --------------------------------------------------------
-
     @modal.method()
     def search_scene(self, job_id, query, top_k=5):
         import torch
@@ -333,6 +344,11 @@ class ClipService:
             )
 
         query_vector = features[0].cpu().tolist()
+
+        if len(query_vector) != 512:
+            raise ValueError(
+                f"Scene query vector dimension is {len(query_vector)}, expected 512"
+            )
 
         pc = Pinecone(
             api_key=os.getenv("PINECONE_API_KEY")
@@ -370,8 +386,6 @@ class ClipService:
 
 # ============================================================
 # MODAL SCENE SEARCH FUNCTION
-# main.py can call this using:
-# modal.Function.from_name("momentum-worker", "search_scenes")
 # ============================================================
 
 @app.function(
@@ -392,6 +406,8 @@ def search_scenes(job_id, query, top_k=5):
 
 # ============================================================
 # AUDIO PROCESSING
+# Audio now downloads the video inside its own Modal container.
+# It does NOT receive /tmp path from process_video.
 # ============================================================
 
 @app.function(
@@ -399,31 +415,47 @@ def search_scenes(job_id, query, top_k=5):
     secrets=secrets,
     timeout=60 * 30
 )
-def process_audio(job_id, video_path):
+def process_audio_from_source(job_id, source_type, source_url):
+    local_video = "/tmp/video/input.mp4"
     audio_path = f"/tmp/{job_id}_audio.mp3"
 
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-i",
-            video_path,
-            "-vn",
-            "-acodec",
-            "mp3",
-            audio_path
-        ],
-        check=True
-    )
-
-    transcribe_audio(
-        job_id,
-        audio_path
-    )
-
     try:
-        os.remove(audio_path)
-    except Exception:
-        pass
+        download_source_video(
+            source_type,
+            source_url,
+            local_video
+        )
+
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                local_video,
+                "-vn",
+                "-acodec",
+                "mp3",
+                audio_path
+            ],
+            check=True
+        )
+
+        transcribe_audio(
+            job_id,
+            audio_path
+        )
+
+    finally:
+        try:
+            if os.path.exists(local_video):
+                os.remove(local_video)
+        except Exception:
+            pass
+
+        try:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+        except Exception:
+            pass
 
 
 def transcribe_audio(job_id, audio_path):
@@ -488,8 +520,6 @@ def save_transcript(job_id, transcription):
 
 # ============================================================
 # AUDIO SEARCH SERVICE
-# SentenceTransformer is separate from CLIP.
-# It loads once per warm AudioSearchService Modal container.
 # ============================================================
 
 @app.cls(
@@ -579,8 +609,6 @@ class AudioSearchService:
 
 # ============================================================
 # MODAL AUDIO SEARCH FUNCTION
-# main.py can call this using:
-# modal.Function.from_name("momentum-worker", "search_audio")
 # ============================================================
 
 @app.function(
@@ -668,6 +696,11 @@ def push_scene_embedding(
     index = pc.Index(
         os.getenv("PINECONE_INDEX")
     )
+
+    if len(vector) != 512:
+        raise ValueError(
+            f"Scene image vector dimension is {len(vector)}, expected 512"
+        )
 
     index.upsert([
         {

@@ -3,8 +3,11 @@ import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.services.search.scene_search import search_scenes
-from app.services.search.audio_search import search_audio
+from app.services.modal_trigger import (
+    trigger_worker,
+    run_scene_search,
+    run_audio_search
+)
 
 from app.services.generate_clips import (
     generate_clip,
@@ -82,7 +85,7 @@ async def create_job(
         "mode": request.mode,
     }
 
-    trigger_worker(job_id, payload)
+    await trigger_worker(job_id, payload)
 
     return {
         "job_id": job_id,
@@ -106,7 +109,7 @@ async def get_job_status(job_id: str):
 @app.post("/search/scene")
 async def scene_search(request: SceneSearchRequest):
 
-    results = search_scenes(
+    results = await run_scene_search (
         request.job_id,
         request.query
     )
@@ -161,7 +164,7 @@ async def scene_search(request: SceneSearchRequest):
 @app.post("/search/audio")
 async def audio_search(request: AudioSearchRequest):
 
-    results = search_audio(
+    results = await run_audio_search (
         request.job_id,
         request.query
     )
