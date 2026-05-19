@@ -314,7 +314,15 @@ class ClipService:
                     **inputs
                 )
 
-            vector = features.detach().cpu().reshape(-1).tolist()
+            if hasattr(features, "pooler_output"):
+                features = features.pooler_output
+
+            vector = features[0].detach().cpu().tolist()
+
+            if len(vector) != 512:
+                raise ValueError(
+                    f"Scene image vector dimension is {len(vector)}, expected 512"
+                )
 
             push_scene_embedding(
                 job_id=job_id,
@@ -344,7 +352,11 @@ class ClipService:
                 **inputs
             )
 
-        query_vector = features.detach().cpu().reshape(-1).tolist()
+        if hasattr(features, "pooler_output"):
+            features = features.pooler_output
+
+        query_vector = features[0].detach().cpu().tolist()
+        
 
         if len(query_vector) != 512:
             raise ValueError(
@@ -703,17 +715,19 @@ def push_scene_embedding(
             f"Scene image vector dimension is {len(vector)}, expected 512"
         )
 
-    index.upsert([
-        {
-            "id": str(uuid.uuid4()),
-            "values": vector,
-            "metadata": {
-                "job_id": job_id,
-                "timestamp": timestamp,
-                "thumbnail_url": thumbnail_url
+    index.upsert(
+        vectors=[
+            {
+                "id": str(uuid.uuid4()),
+                "values": vector,
+                "metadata": {
+                    "job_id": job_id,
+                    "timestamp": timestamp,
+                    "thumbnail_url": thumbnail_url
+                }
             }
-        }
-    ])
+        ]
+    )
 
 
 def update_job_status(job_id, status):
