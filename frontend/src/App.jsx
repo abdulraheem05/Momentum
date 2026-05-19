@@ -34,6 +34,29 @@ export default function App() {
 
   const [history, setHistory] = useState([]);
 
+  const pollJob = async (id) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await axios.get(`${API}/jobs/${id}`);
+
+        setJobStatus(res.data.status);
+
+        if (res.data.status === "READY") {
+          setReady(true);
+          clearInterval(interval);
+        }
+
+        if (res.data.status === "FAILED") {
+          alert("Processing failed");
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error("Polling failed:", err);
+        clearInterval(interval);
+      }
+    }, 3000);
+  };
+
   const uploadVideo = async () => {
 
     if (!file && !youtubeUrl.trim()) {
@@ -59,6 +82,7 @@ export default function App() {
         );
 
         setJobId(res.data.job_id);
+        setJobStatus("PROCESSING");
 
         pollJob(res.data.job_id);
 
