@@ -104,6 +104,9 @@ async def get_job_status(job_id: str):
         .execute()
     )
 
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Job id not found")
+
     return response.data[0]
 
 @app.post("/search/scene")
@@ -231,7 +234,7 @@ async def delete_job(job_id: str):
         .select("*")
         .eq("id", job_id)
         .execute()
-    ).data[0]
+    )
 
     if not job_response:
         raise HTTPException(status_code=404, detail="Job id not found")

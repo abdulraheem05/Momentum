@@ -118,7 +118,8 @@ def process_video(job_id, payload):
 # ============================================================
 
 def split_video_chunks(video_path):
-    output_dir = "/tmp/chunks"
+
+    output_dir = f"/tmp/chunks_{uuid.uuid4()}"
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -242,7 +243,7 @@ class ClipService:
 
     @modal.method()
     def process_video_file(self, job_id, source_type, source_url):
-        local_video = "/tmp/video/input.mp4"
+        local_video = f"/tmp/video/{job_id}.mp4"
 
         try:
             download_source_video(
@@ -416,7 +417,7 @@ def search_scenes(job_id, query, top_k=5):
     timeout=60 * 30
 )
 def process_audio_from_source(job_id, source_type, source_url):
-    local_video = "/tmp/video/input.mp4"
+    local_video = f"/tmp/video/{job_id}.mp4"
     audio_path = f"/tmp/{job_id}_audio.mp3"
 
     try:
