@@ -2,9 +2,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.supabase_client import supabase
 from app.youtube_utils import extract_youtube_id
 from app.modal_client import trigger_modal_processing
+from app.job_repository import (
+    create_youtube_job as create_job_record,
+    get_youtube_job_by_id,
+    mark_job_worker_trigger_failed,
+)
 
 
 app = FastAPI(title="Momentum YouTube V1 Backend")
@@ -34,32 +38,17 @@ def health_check():
 @app.post("/youtube/jobs")
 def create_youtube_job(payload: CreateYouTubeJobRequest):
     """
-    Creates a Supabase job and triggers the Modal worker.
+    Creates a job record and triggers the Modal worker.
     """
 
     try:
         youtube_id = extract_youtube_id(payload.youtube_url)
 
-        insert_response = (
-            supabase
-            .table("youtube_jobs")
-            .insert({
-                "youtube_url": payload.youtube_url,
-                "youtube_id": youtube_id,
-                "status": "queued",
-                "progress": 0,
-                "message": "Job created. Waiting for worker.",
-            })
-            .execute()
+        job = create_job_record(
+            youtube_url=payload.youtube_url,
+            youtube_id=youtube_id,
         )
 
-        if not insert_response.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to create job in Supabase."
-            )
-
-        job = insert_response.data[0]
         job_id = job["id"]
 
         try:
@@ -69,17 +58,9 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
                 youtube_id=youtube_id,
             )
         except Exception as modal_error:
-            (
-                supabase
-                .table("youtube_jobs")
-                .update({
-                    "status": "failed",
-                    "progress": 0,
-                    "message": "Failed to trigger worker.",
-                    "error": str(modal_error),
-                })
-                .eq("id", job_id)
-                .execute()
+            mark_job_worker_trigger_failed(
+                job_id=job_id,
+                error_message=str(modal_error),
             )
 
             raise HTTPException(
@@ -90,8 +71,8 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
         return {
             "job_id": job_id,
             "youtube_id": youtube_id,
-            "status": "queued",
-            "progress": 0,
+            "status": job["status"],
+            "progress": job["progress"],
             "message": "Job created and worker triggered.",
         }
 
@@ -111,16 +92,9 @@ def get_youtube_job(job_id: str):
     Frontend uses this endpoint to poll progress.
     """
 
-    response = (
-        supabase
-        .table("youtube_jobs")
-        .select("*")
-        .eq("id", job_id)
-        .single()
-        .execute()
-    )
+    job = get_youtube_job_by_id(job_id)
 
-    if not response.data:
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    return response.data
+    return job
