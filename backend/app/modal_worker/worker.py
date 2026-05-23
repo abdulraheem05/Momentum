@@ -14,10 +14,19 @@ app = modal.App("momentum-youtube-v1-worker")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg")
+    .apt_install(
+        "ffmpeg",
+        "curl",
+        "unzip",
+    )
+    .run_commands(
+        "curl -fsSL https://deno.land/install.sh | sh",
+        "ln -s /root/.deno/bin/deno /usr/local/bin/deno",
+        "deno --version",
+    )
     .pip_install(
         "fastapi[standard]",
-        "yt-dlp",
+        "yt-dlp[default]",
         "groq",
         "supabase",
         "azure-storage-blob",
@@ -93,8 +102,8 @@ def update_job(
 
 def download_youtube_audio(youtube_url: str, workdir: str) -> tuple[str, str]:
     """
-    Downloads best available audio from YouTube and converts it to mp3.
-    Returns audio_path and video_title.
+    Downloads YouTube media and extracts audio to mp3.
+    Uses cookies if provided through Modal Secret.
     """
 
     import yt_dlp
@@ -102,20 +111,50 @@ def download_youtube_audio(youtube_url: str, workdir: str) -> tuple[str, str]:
     file_stem = str(uuid.uuid4())
     output_template = os.path.join(workdir, f"{file_stem}.%(ext)s")
 
+    cookies_text = os.environ.get("YOUTUBE_COOKIES")
+    cookies_path = None
+
+    if cookies_text:
+        cookies_path = os.path.join(workdir, "youtube_cookies.txt")
+        with open(cookies_path, "w", encoding="utf-8") as cookie_file:
+            cookie_file.write(cookies_text)
+
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": output_template,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "64",
-            }
-        ],
-    }
+    "format": "139/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[acodec!=none]/best",
+
+    "outtmpl": output_template,
+    "noplaylist": True,
+    "quiet": False,
+    "no_warnings": False,
+
+    "retries": 5,
+    "fragment_retries": 5,
+    "extractor_retries": 5,
+    "socket_timeout": 30,
+
+    "force_ipv4": True,
+
+    "js_runtimes": {
+        "deno": {},
+    },
+
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "web"]
+        }
+    },
+
+    "postprocessors": [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "64",
+        }
+    ],
+}
+
+    if cookies_path:
+        ydl_opts["cookiefile"] = cookies_path
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(youtube_url, download=True)
@@ -124,7 +163,10 @@ def download_youtube_audio(youtube_url: str, workdir: str) -> tuple[str, str]:
     audio_path = os.path.join(workdir, f"{file_stem}.mp3")
 
     if not os.path.exists(audio_path):
-        raise FileNotFoundError("Audio extraction failed. MP3 file was not created.")
+        existing_files = os.listdir(workdir)
+        raise FileNotFoundError(
+            f"Audio extraction failed. MP3 file was not created. Files found: {existing_files}"
+        )
 
     return audio_path, video_title
 
@@ -222,6 +264,7 @@ def upload_transcript_to_azure(
     timeout=60 * 60,
     secrets=[
         modal.Secret.from_name("momentum-youtube-v1-secrets"),
+        modal.Secret.from_name("momentum-youtube-cookies"),
     ],
 )
 def process_youtube_video_background(
@@ -328,6 +371,7 @@ def process_youtube_video_background(
     timeout=60,
     secrets=[
         modal.Secret.from_name("momentum-youtube-v1-secrets"),
+        modal.Secret.from_name("momentum-youtube-cookies"),
     ],
 )
 @modal.fastapi_endpoint(method="POST")
