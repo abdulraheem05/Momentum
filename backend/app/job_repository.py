@@ -19,7 +19,7 @@ def create_youtube_job(
             "youtube_id": youtube_id,
             "status": "queued",
             "progress": 0,
-            "message": "Job created. Waiting for worker.",
+            "message": "Job created. Submitting to worker.",
         })
         .execute()
     )

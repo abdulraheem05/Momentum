@@ -23,7 +23,7 @@ def trigger_modal_processing(job_id: str, youtube_url: str, youtube_id: str) -> 
     response = requests.post(
         settings.MODAL_PROCESS_URL,
         json=payload,
-        timeout=20,
+        timeout=15,
     )
 
     response.raise_for_status()

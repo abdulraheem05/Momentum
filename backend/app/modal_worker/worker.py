@@ -94,8 +94,9 @@ def update_job(
 def download_youtube_audio(youtube_url: str, workdir: str) -> tuple[str, str]:
     """
     Downloads best available audio from YouTube and converts it to mp3.
-    Returns: audio_path, video_title
+    Returns audio_path and video_title.
     """
+
     import yt_dlp
 
     file_stem = str(uuid.uuid4())
@@ -132,6 +133,7 @@ def transcribe_with_groq(audio_path: str) -> List[Dict[str, Any]]:
     """
     Transcribes audio using Groq Whisper and returns timestamped segments.
     """
+
     from groq import Groq
 
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
@@ -147,14 +149,12 @@ def transcribe_with_groq(audio_path: str) -> List[Dict[str, Any]]:
 
     if raw_segments is None:
         raise RuntimeError(
-            "Groq transcription did not return segments. "
-            "Check response_format='verbose_json'."
+            "Groq transcription did not return timestamp segments."
         )
 
     segments: List[Dict[str, Any]] = []
 
     for index, segment in enumerate(raw_segments):
-        # Groq SDK objects can behave like attributes, but this fallback keeps it safe.
         start = getattr(segment, "start", None)
         end = getattr(segment, "end", None)
         text = getattr(segment, "text", None)
@@ -186,21 +186,21 @@ def upload_transcript_to_azure(
 ) -> tuple[str, str]:
     """
     Uploads transcript JSON to Azure Blob.
-    Returns: blob_name, blob_url
+    Returns blob_name and blob_url.
     """
+
     from azure.storage.blob import BlobServiceClient, ContentSettings
 
     connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
     container_name = os.environ["AZURE_TRANSCRIPTS_CONTAINER"]
 
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-
     container_client = blob_service_client.get_container_client(container_name)
 
     try:
         container_client.create_container()
     except Exception:
-        # Container probably already exists.
+        # Container already exists, or creation is not allowed.
         pass
 
     blob_name = f"{job_id}.json"
@@ -219,16 +219,22 @@ def upload_transcript_to_azure(
 
 @app.function(
     image=image,
-    timeout=60 * 30,
+    timeout=60 * 60,
     secrets=[
         modal.Secret.from_name("momentum-youtube-v1-secrets"),
     ],
 )
-@modal.fastapi_endpoint(method="POST")
-def process_youtube_video(payload: ProcessYouTubeRequest):
-    job_id = payload.job_id
-    youtube_url = payload.youtube_url
-    youtube_id = payload.youtube_id
+def process_youtube_video_background(
+    job_id: str,
+    youtube_url: str,
+    youtube_id: str,
+) -> Dict[str, Any]:
+    """
+    Background worker.
+
+    This function does the heavy work. It is NOT exposed as a web endpoint.
+    The public endpoint only spawns this function and returns immediately.
+    """
 
     try:
         update_job(
@@ -298,7 +304,6 @@ def process_youtube_video(payload: ProcessYouTubeRequest):
             "ok": True,
             "job_id": job_id,
             "status": "ready",
-            "progress": 100,
             "transcript_blob_name": blob_name,
         }
 
@@ -316,3 +321,41 @@ def process_youtube_video(payload: ProcessYouTubeRequest):
             "job_id": job_id,
             "error": str(error),
         }
+
+
+@app.function(
+    image=image,
+    timeout=60,
+    secrets=[
+        modal.Secret.from_name("momentum-youtube-v1-secrets"),
+    ],
+)
+@modal.fastapi_endpoint(method="POST")
+def start_youtube_processing(payload: ProcessYouTubeRequest):
+    """
+    Public Modal web endpoint.
+
+    This does NOT process the video directly.
+    It only spawns the background worker and returns immediately.
+    """
+
+    function_call = process_youtube_video_background.spawn(
+        job_id=payload.job_id,
+        youtube_url=payload.youtube_url,
+        youtube_id=payload.youtube_id,
+    )
+
+    update_job(
+        job_id=payload.job_id,
+        status="queued",
+        progress=5,
+        message="Processing job submitted to Modal.",
+        error="",
+    )
+
+    return {
+        "ok": True,
+        "job_id": payload.job_id,
+        "modal_call_id": function_call.object_id,
+        "message": "Processing started in background.",
+    }
