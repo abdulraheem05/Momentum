@@ -1,257 +1,126 @@
-import uuid
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from app.services.modal_trigger import (
-    trigger_worker,
-    run_scene_search,
-    run_audio_search
-)
-
-from app.services.generate_clips import (
-    generate_clip,
-    upload_result_clip
-)
-
-from app.services.history import (
-    save_history,
-    get_history
-)
-
-from app.models.schemas import (
-    UploadCompleteRequest,
-    SceneSearchRequest,
-    AudioSearchRequest
-)
+from app.supabase_client import supabase
+from app.youtube_utils import extract_youtube_id
+from app.modal_client import trigger_modal_processing
 
 
-from app.services.cleanup import (
-    delete_original_video
-)
+app = FastAPI(title="Momentum YouTube V1 Backend")
 
-from app.services.azure_sas import generate_upload_sas
-from app.services.modal_trigger import trigger_worker
-
-from app.db.supabase import supabase
-
-app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # later replace with your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+class CreateYouTubeJobRequest(BaseModel):
+    youtube_url: str
+
+
 @app.get("/")
-async def home():
-    return {"message": "Momentum Backend Running"}
-
-
-@app.get("/upload/sas-token")
-async def get_sas_token():
-
-    return generate_upload_sas()
-
-
-@app.post("/jobs/create")
-async def create_job(
-    request: UploadCompleteRequest
-):
-
-    job_id = str(uuid.uuid4())
-
-    source_url = request.blob_url or request.youtube_url
-
-    (
-        supabase
-        .table("jobs")
-        .insert({
-            "id": job_id,
-            "source_type": request.source_type,
-            "source_url": source_url,
-            "mode": request.mode,
-            "status": "PROCESSING"
-        })
-        .execute()
-    )
-
-    payload = {
-        "source_type": request.source_type,
-        "source_url": source_url,
-        "mode": request.mode,
-    }
-
-    await trigger_worker(job_id, payload)
-
+def health_check():
     return {
-        "job_id": job_id,
-        "status": "PROCESSING"
+        "status": "ok",
+        "message": "Momentum YouTube V1 backend is running",
     }
 
 
-@app.get("/jobs/{job_id}")
-async def get_job_status(job_id: str):
+@app.post("/youtube/jobs")
+def create_youtube_job(payload: CreateYouTubeJobRequest):
+    """
+    Creates a Supabase job and triggers the Modal worker.
+    """
+
+    try:
+        youtube_id = extract_youtube_id(payload.youtube_url)
+
+        insert_response = (
+            supabase
+            .table("youtube_jobs")
+            .insert({
+                "youtube_url": payload.youtube_url,
+                "youtube_id": youtube_id,
+                "status": "queued",
+                "progress": 0,
+                "message": "Job created. Waiting for worker.",
+            })
+            .execute()
+        )
+
+        if not insert_response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create job in Supabase."
+            )
+
+        job = insert_response.data[0]
+        job_id = job["id"]
+
+        try:
+            trigger_modal_processing(
+                job_id=job_id,
+                youtube_url=payload.youtube_url,
+                youtube_id=youtube_id,
+            )
+        except Exception as modal_error:
+            (
+                supabase
+                .table("youtube_jobs")
+                .update({
+                    "status": "failed",
+                    "progress": 0,
+                    "message": "Failed to trigger worker.",
+                    "error": str(modal_error),
+                })
+                .eq("id", job_id)
+                .execute()
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Job created but failed to trigger worker: {modal_error}",
+            )
+
+        return {
+            "job_id": job_id,
+            "youtube_id": youtube_id,
+            "status": "queued",
+            "progress": 0,
+            "message": "Job created and worker triggered.",
+        }
+
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/youtube/jobs/{job_id}")
+def get_youtube_job(job_id: str):
+    """
+    Frontend uses this endpoint to poll progress.
+    """
 
     response = (
         supabase
-        .table("jobs")
+        .table("youtube_jobs")
         .select("*")
         .eq("id", job_id)
+        .single()
         .execute()
     )
 
     if not response.data:
-        raise HTTPException(status_code=404, detail="Job id not found")
+        raise HTTPException(status_code=404, detail="Job not found.")
 
-    return response.data[0]
-
-@app.post("/search/scene")
-async def scene_search(request: SceneSearchRequest):
-
-    results = await run_scene_search (
-        request.job_id,
-        request.query
-    )
-
-    response = []
-
-    job_response = (
-        supabase
-        .table("jobs")
-        .select("*")
-        .eq("id", request.job_id)
-        .execute()
-    )
-
-    if not job_response.data:
-        raise HTTPException(status_code=404, detail="Job id not found")
-    
-    job = job_response.data[0]
-
-    source_video = job["source_url"]
-
-    for item in results:
-
-        clip_path = generate_clip(
-            source_video,
-            item["timestamp"]
-        )
-
-        clip_url = upload_result_clip(
-            clip_path
-        )
-
-        save_history(
-            request.job_id,
-            request.query,
-            "scene",
-            clip_url,
-            item["thumbnail_url"],
-            item["timestamp"]
-        )
-
-        response.append({
-            "clip_url": clip_url,
-            "thumbnail_url": item["thumbnail_url"],
-            "timestamp": item["timestamp"],
-            "score": item["score"]
-        })
-
-    return response
-
-
-@app.post("/search/audio")
-async def audio_search(request: AudioSearchRequest):
-
-    results = await run_audio_search (
-        request.job_id,
-        request.query
-    )
-
-    response = []
-
-    job_response = (
-        supabase
-        .table("jobs")
-        .select("*")
-        .eq("id", request.job_id)
-        .execute()
-    )
-
-    if not job_response.data:
-        raise HTTPException(status_code=404, detail="Job id not found")
-    
-    job = job_response.data[0]
-
-    source_video = job["source_url"]
-
-    for item in results:
-
-        clip_path = generate_clip(
-            source_video,
-            item["timestamp"]
-        )
-
-        clip_url = upload_result_clip(
-            clip_path
-        )
-
-        thumbnail_url = ""
-
-        save_history(
-            request.job_id,
-            request.query,
-            "audio",
-            clip_url,
-            thumbnail_url,
-            item["timestamp"]
-        )
-
-        response.append({
-            "clip_url": clip_url,
-            "timestamp": item["timestamp"],
-            "score": item["score"]
-        })
-
-    return response
-
-@app.get("/history")
-async def history():
-
-    return get_history()
-
-
-@app.delete("/jobs/{job_id}")
-async def delete_job(job_id: str):
-
-    job_response = (
-        supabase
-        .table("jobs")
-        .select("*")
-        .eq("id", job_id)
-        .execute()
-    )
-
-    if not job_response:
-        raise HTTPException(status_code=404, detail="Job id not found")
-    
-    job = job_response.data[0]
-
-    if job["source_type"] == "upload":
-        delete_original_video(job["source_url"])
-
-    (
-        supabase
-        .table("jobs")
-        .delete()
-        .eq("id", job_id)
-        .execute()
-    )
-
-    return {
-        "message": "Original movie deleted"
-    }
+    return response.data
