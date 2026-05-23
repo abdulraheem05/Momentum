@@ -10,6 +10,8 @@ from app.job_repository import (
     mark_job_worker_trigger_failed,
 )
 
+from app.azure_utils import load_transcript_json
+from app.search.dialogue_search import search_dialogue_in_transcript
 
 app = FastAPI(title="Momentum YouTube V1 Backend")
 
@@ -25,6 +27,10 @@ app.add_middleware(
 
 class CreateYouTubeJobRequest(BaseModel):
     youtube_url: str
+
+class SearchDialogueRequest(BaseModel):
+    job_id: str
+    query: str
 
 
 @app.get("/")
@@ -98,3 +104,50 @@ def get_youtube_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found.")
 
     return job
+
+@app.post("/youtube/search-dialogue")
+def search_dialogue(payload: SearchDialogueRequest):
+    """
+    Searches remembered dialogue inside the transcript JSON stored in Azure.
+    """
+
+    try:
+        job = get_youtube_job_by_id(payload.job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+
+        if job["status"] != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job is not ready yet. Current status: {job['status']}",
+            )
+
+        blob_name = job.get("transcript_blob_name")
+
+        if not blob_name:
+            raise HTTPException(
+                status_code=500,
+                detail="Transcript blob name is missing for this job.",
+            )
+
+        transcript_data = load_transcript_json(blob_name)
+
+        results = search_dialogue_in_transcript(
+            transcript_data=transcript_data,
+            query=payload.query,
+            max_results=3,
+        )
+
+        return {
+            "job_id": payload.job_id,
+            "query": payload.query,
+            "count": len(results),
+            "results": results,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))

@@ -9,6 +9,13 @@ class Settings:
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     MODAL_PROCESS_URL: str = os.getenv("MODAL_PROCESS_URL", "")
 
+    AZURE_STORAGE_CONNECTION_STRING: str = os.getenv(
+        "AZURE_STORAGE_CONNECTION_STRING", ""
+    )
+    AZURE_TRANSCRIPTS_CONTAINER: str = os.getenv(
+        "AZURE_TRANSCRIPTS_CONTAINER", "transcripts"
+    )
+
 
 settings = Settings()
 
@@ -21,6 +28,9 @@ def validate_required_env() -> None:
 
     if not settings.SUPABASE_KEY:
         missing.append("SUPABASE_KEY")
+
+    if not settings.AZURE_STORAGE_CONNECTION_STRING:
+        missing.append("AZURE_STORAGE_CONNECTION_STRING")
 
     if missing:
         raise RuntimeError(
