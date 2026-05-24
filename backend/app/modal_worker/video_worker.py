@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 import modal
 from pydantic import BaseModel
+WORKER_VERSION = "video-worker-clip-fix-v3"
 
 
 app = modal.App("momentum-youtube-video-worker")
@@ -356,7 +357,14 @@ def embed_image(frame_path: str) -> List[float]:
     )
 
     with torch.no_grad():
-        image_features = model.get_image_features(**inputs)
+        # 1. Run the raw vision model
+        vision_outputs = model.vision_model(pixel_values=inputs.pixel_values)
+        
+        # 2. Grab the pooler_output (Shape: [1, 768])
+        pooled_output = vision_outputs.pooler_output
+        
+        # 3. Force it through the projection layer to get exactly 512 dimensions
+        image_features = model.visual_projection(pooled_output)
 
     # Expected shape: [1, 512]
     print(f"[CLIP] image_features shape: {tuple(image_features.shape)}")
@@ -379,7 +387,17 @@ def embed_text(query: str) -> List[float]:
     )
 
     with torch.no_grad():
-        text_features = model.get_text_features(**inputs)
+        # 1. Run the raw text model
+        text_outputs = model.text_model(
+            input_ids=inputs.input_ids, 
+            attention_mask=inputs.attention_mask
+        )
+        
+        # 2. Grab the pooler_output (Shape: [1, 512])
+        pooled_output = text_outputs.pooler_output
+        
+        # 3. Force it through the text projection layer
+        text_features = model.text_projection(pooled_output)
 
     # Expected shape: [1, 512]
     print(f"[CLIP] text_features shape: {tuple(text_features.shape)}")
@@ -514,11 +532,12 @@ def process_video_background(
     youtube_id: str,
 ) -> Dict[str, Any]:
     try:
+        print(f"[WORKER_VERSION] {WORKER_VERSION}")
         update_parent_job(
             job_id=job_id,
             status="processing",
             progress=10,
-            message="Video worker started.",
+            message=f"Running {WORKER_VERSION}",
             error="",
         )
 
@@ -555,7 +574,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=60,
-                message="Creating CLIP embeddings and indexing scenes.",
+                message=f"{WORKER_VERSION} Creating CLIP embeddings and indexing scenes.",
             )
 
             update_video_job(
