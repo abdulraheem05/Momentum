@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.youtube_utils import extract_youtube_id
-from app.modal_client import trigger_modal_processing
+from app.modal_client import trigger_modal_processing, call_modal_visual_search
 from app.job_repository import (
     create_youtube_job as create_job_record,
     get_youtube_job_by_id,
+    get_youtube_job_with_details,
     mark_job_worker_trigger_failed,
 )
 
@@ -27,6 +28,12 @@ app.add_middleware(
 
 class CreateYouTubeJobRequest(BaseModel):
     youtube_url: str
+    mode: str = "audio"
+
+
+class SearchVisualRequest(BaseModel):
+    job_id: str
+    query: str
 
 class SearchDialogueRequest(BaseModel):
     job_id: str
@@ -43,16 +50,21 @@ def health_check():
 
 @app.post("/youtube/jobs")
 def create_youtube_job(payload: CreateYouTubeJobRequest):
-    """
-    Creates a job record and triggers the Modal worker.
-    """
-
     try:
+        mode = payload.mode.lower().strip()
+
+        if mode not in ["audio", "video"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid mode. Use 'audio' or 'video'.",
+            )
+
         youtube_id = extract_youtube_id(payload.youtube_url)
 
         job = create_job_record(
             youtube_url=payload.youtube_url,
             youtube_id=youtube_id,
+            mode=mode,
         )
 
         job_id = job["id"]
@@ -62,6 +74,7 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
                 job_id=job_id,
                 youtube_url=payload.youtube_url,
                 youtube_id=youtube_id,
+                mode=mode,
             )
         except Exception as modal_error:
             mark_job_worker_trigger_failed(
@@ -77,9 +90,10 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
         return {
             "job_id": job_id,
             "youtube_id": youtube_id,
+            "mode": mode,
             "status": job["status"],
             "progress": job["progress"],
-            "message": "Job created and worker triggered.",
+            "message": f"{mode.capitalize()} job created and worker triggered.",
         }
 
     except ValueError as error:
@@ -94,11 +108,7 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
 
 @app.get("/youtube/jobs/{job_id}")
 def get_youtube_job(job_id: str):
-    """
-    Frontend uses this endpoint to poll progress.
-    """
-
-    job = get_youtube_job_by_id(job_id)
+    job = get_youtube_job_with_details(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -145,6 +155,42 @@ def search_dialogue(payload: SearchDialogueRequest):
             "count": len(results),
             "results": results,
         }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    
+
+@app.post("/youtube/search-visual")
+def search_visual(payload: SearchVisualRequest):
+    try:
+        job = get_youtube_job_with_details(payload.job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+
+        if job["mode"] != "video":
+            raise HTTPException(
+                status_code=400,
+                detail="This job is not a video search job.",
+            )
+
+        if job["status"] != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video job is not ready yet. Current status: {job['status']}",
+            )
+
+        result = call_modal_visual_search(
+            job_id=payload.job_id,
+            youtube_id=job["youtube_id"],
+            query=payload.query,
+            top_k=3,
+        )
+
+        return result
 
     except HTTPException:
         raise
