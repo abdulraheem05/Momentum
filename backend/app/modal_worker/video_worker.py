@@ -325,6 +325,15 @@ def normalize_vector(values):
     import numpy as np
 
     array = np.array(values, dtype="float32")
+
+    # Force it to be one-dimensional
+    array = array.reshape(-1)
+
+    if array.shape[0] != 512:
+        raise ValueError(
+            f"CLIP embedding dimension is wrong. Expected 512, got {array.shape[0]}"
+        )
+
     norm = np.linalg.norm(array)
 
     if norm == 0:
@@ -349,7 +358,10 @@ def embed_image(frame_path: str) -> List[float]:
     with torch.no_grad():
         image_features = model.get_image_features(**inputs)
 
-    vector = image_features[0].cpu().numpy()
+    # Expected shape: [1, 512]
+    print(f"[CLIP] image_features shape: {tuple(image_features.shape)}")
+
+    vector = image_features.squeeze(0).cpu().numpy()
 
     return normalize_vector(vector)
 
@@ -369,7 +381,10 @@ def embed_text(query: str) -> List[float]:
     with torch.no_grad():
         text_features = model.get_text_features(**inputs)
 
-    vector = text_features[0].cpu().numpy()
+    # Expected shape: [1, 512]
+    print(f"[CLIP] text_features shape: {tuple(text_features.shape)}")
+
+    vector = text_features.squeeze(0).cpu().numpy()
 
     return normalize_vector(vector)
 
@@ -429,6 +444,11 @@ def index_video_scenes(
         )
 
         embedding = embed_image(frame_path)
+
+        print(f"[Pinecone] Embedding length: {len(embedding)}")
+
+        if len(embedding) != 512:
+            raise ValueError(f"Invalid embedding length: {len(embedding)}")
 
         vector_id = f"{job_id}-{scene_index}"
 
