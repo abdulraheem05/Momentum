@@ -240,7 +240,9 @@ def detect_scenes(video_path: str) -> List[Dict[str, float]]:
         start_seconds = start.get_seconds()
         end_seconds = end.get_seconds()
 
-        if end_seconds <= start_seconds:
+        duration = end_seconds - start_seconds
+
+        if duration <= 1.0:
             continue
 
         middle_seconds = (start_seconds + end_seconds) / 2
@@ -405,8 +407,11 @@ def index_video_scenes(
     namespace = youtube_id
 
     scenes = detect_scenes(video_path)
+    scenes = scenes[:100]
 
-    vectors = []
+    batch = []
+    batch_size = 5
+    indexed_count = 0
 
     for scene in scenes:
         scene_index = scene["scene_index"]
@@ -430,7 +435,7 @@ def index_video_scenes(
         metadata = {
             "job_id": job_id,
             "youtube_id": youtube_id,
-            "scene_index": scene_index,
+            "scene_index": int(scene_index),
             "timestamp": float(timestamp),
             "timestamp_label": format_timestamp(timestamp),
             "youtube_url": build_youtube_timestamp_url(youtube_id, timestamp),
@@ -438,18 +443,41 @@ def index_video_scenes(
             "scene_end": float(scene["end_time"]),
         }
 
-        vectors.append((vector_id, embedding, metadata))
+        batch.append((vector_id, embedding, metadata))
 
-    batch_size = 50
+        if len(batch) >= batch_size:
+            index.upsert(
+                vectors=batch,
+                namespace=namespace,
+            )
 
-    for start in range(0, len(vectors), batch_size):
-        batch = vectors[start:start + batch_size]
+            indexed_count += len(batch)
+
+            update_video_job(
+                job_id=job_id,
+                visual_indexed_count=indexed_count,
+            )
+
+            print(f"[Pinecone] Upserted {indexed_count} scene vectors")
+
+            batch.clear()
+
+    if batch:
         index.upsert(
             vectors=batch,
             namespace=namespace,
         )
 
-    return len(vectors)
+        indexed_count += len(batch)
+
+        update_video_job(
+            job_id=job_id,
+            visual_indexed_count=indexed_count,
+        )
+
+        print(f"[Pinecone] Final upsert complete. Total: {indexed_count}")
+
+    return indexed_count
 
 
 @app.function(
