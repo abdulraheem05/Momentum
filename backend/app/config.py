@@ -7,7 +7,10 @@ load_dotenv()
 class Settings:
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
-    MODAL_PROCESS_URL: str = os.getenv("MODAL_PROCESS_URL", "")
+
+    MODAL_AUDIO_PROCESS_URL: str = os.getenv("MODAL_AUDIO_PROCESS_URL", "")
+    MODAL_VIDEO_PROCESS_URL: str = os.getenv("MODAL_VIDEO_PROCESS_URL", "")
+    MODAL_VIDEO_SEARCH_URL: str = os.getenv("MODAL_VIDEO_SEARCH_URL", "")
 
     AZURE_STORAGE_CONNECTION_STRING: str = os.getenv(
         "AZURE_STORAGE_CONNECTION_STRING", ""
@@ -28,9 +31,6 @@ def validate_required_env() -> None:
 
     if not settings.SUPABASE_KEY:
         missing.append("SUPABASE_KEY")
-
-    if not settings.AZURE_STORAGE_CONNECTION_STRING:
-        missing.append("AZURE_STORAGE_CONNECTION_STRING")
 
     if missing:
         raise RuntimeError(
