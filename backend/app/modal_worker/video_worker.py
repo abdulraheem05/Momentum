@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 import modal
 from pydantic import BaseModel
-WORKER_VERSION = "video-worker-clip-fix-v3"
 
 
 app = modal.App("momentum-youtube-video-worker")
@@ -532,12 +531,11 @@ def process_video_background(
     youtube_id: str,
 ) -> Dict[str, Any]:
     try:
-        print(f"[WORKER_VERSION] {WORKER_VERSION}")
         update_parent_job(
             job_id=job_id,
             status="processing",
             progress=10,
-            message=f"Running {WORKER_VERSION}",
+            message=f"Modal started processing",
             error="",
         )
 
@@ -574,7 +572,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=60,
-                message=f"{WORKER_VERSION} Creating CLIP embeddings and indexing scenes.",
+                message=f"Creating CLIP embeddings and indexing scenes.",
             )
 
             update_video_job(
