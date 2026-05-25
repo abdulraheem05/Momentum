@@ -2,8 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from fastapi import BackgroundTasks
+
 from app.youtube_utils import extract_youtube_id
-from app.modal_client import trigger_modal_processing, call_modal_visual_search
+from app.modal_client import trigger_modal_processing
 from app.job_repository import (
     create_youtube_job as create_job_record,
     get_youtube_job_by_id,
@@ -13,6 +15,7 @@ from app.job_repository import (
 
 from app.azure_utils import load_transcript_json
 from app.search.dialogue_search import search_dialogue_in_transcript
+from app.search.visual_search import warmup_clip_model, search_visual_scenes_backend
 
 app = FastAPI(title="Momentum YouTube V1 Backend")
 
@@ -49,7 +52,7 @@ def health_check():
 
 
 @app.post("/youtube/jobs")
-def create_youtube_job(payload: CreateYouTubeJobRequest):
+def create_youtube_job(payload: CreateYouTubeJobRequest, background_tasks: BackgroundTasks):
     try:
         mode = payload.mode.lower().strip()
 
@@ -86,6 +89,9 @@ def create_youtube_job(payload: CreateYouTubeJobRequest):
                 status_code=500,
                 detail=f"Job created but failed to trigger worker: {modal_error}",
             )
+        
+        if mode == "video":
+            background_tasks.add_task(warmup_clip_model)
 
         return {
             "job_id": job_id,
@@ -191,20 +197,30 @@ def search_visual(payload: SearchVisualRequest):
                 detail="This job is not a video search job.",
             )
 
-        if job["status"] != "ready":
+        video_details = job.get("video_details")
+
+        if not video_details:
             raise HTTPException(
-                status_code=400,
-                detail=f"Video job is not ready yet. Current status: {job['status']}",
+                status_code=500,
+                detail="Video details are missing for this job.",
             )
 
-        result = call_modal_visual_search(
-            job_id=payload.job_id,
+        if video_details["visual_status"] != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video index is not ready yet. Current status: {video_details['visual_status']}",
+            )
+
+        result = search_visual_scenes_backend(
             youtube_id=job["youtube_id"],
             query=payload.query,
             top_k=3,
         )
 
-        return result
+        return {
+            "job_id": payload.job_id,
+            **result,
+        }
 
     except HTTPException:
         raise

@@ -10,7 +10,6 @@ class Settings:
 
     MODAL_AUDIO_PROCESS_URL: str = os.getenv("MODAL_AUDIO_PROCESS_URL", "")
     MODAL_VIDEO_PROCESS_URL: str = os.getenv("MODAL_VIDEO_PROCESS_URL", "")
-    MODAL_VIDEO_SEARCH_URL: str = os.getenv("MODAL_VIDEO_SEARCH_URL", "")
 
     AZURE_STORAGE_CONNECTION_STRING: str = os.getenv(
         "AZURE_STORAGE_CONNECTION_STRING", ""
@@ -18,6 +17,9 @@ class Settings:
     AZURE_TRANSCRIPTS_CONTAINER: str = os.getenv(
         "AZURE_TRANSCRIPTS_CONTAINER", "transcripts"
     )
+
+    PINECONE_API_KEY: str = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME", "")
 
 
 settings = Settings()

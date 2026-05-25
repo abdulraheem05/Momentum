@@ -171,9 +171,9 @@ def download_youtube_video(
         # Prefer mp4 video with audio if available.
         # Fallback to any best format.
         "format": (
-            "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
-            "best[height<=480][ext=mp4]/"
-            "best[height<=480]/"
+            "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/"
+            "best[height<=360][ext=mp4]/"
+            "best[height<=360]/"
             "best"
         ),
         "merge_output_format": "mp4",
@@ -235,7 +235,7 @@ def detect_scenes(video_path: str) -> List[Dict[str, float]]:
 
     raw_scenes = detect(
         video_path,
-        ContentDetector(threshold=35.0),
+        ContentDetector(threshold=30.0),
         start_in_scene=True,
     )
 

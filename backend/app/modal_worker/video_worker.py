@@ -48,13 +48,6 @@ class StartVideoRequest(BaseModel):
     mode: str = "video"
 
 
-class VisualSearchRequest(BaseModel):
-    job_id: str
-    youtube_id: str
-    query: str
-    top_k: int = 3
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -174,9 +167,9 @@ def download_youtube_video(
 
     ydl_opts = {
         "format": (
-            "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
-            "best[height<=480][ext=mp4]/"
-            "best[height<=480]/"
+            "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/"
+            "best[height<=360][ext=mp4]/"
+            "best[height<=360]/"
             "best"
         ),
         "merge_output_format": "mp4",
@@ -242,7 +235,7 @@ def detect_scenes(video_path: str) -> List[Dict[str, float]]:
 
     raw_scenes = detect(
         video_path,
-        ContentDetector(threshold=35.0),
+        ContentDetector(threshold=30.0),
         start_in_scene=True,
     )
 
@@ -398,43 +391,6 @@ def embed_images_batch(images) -> List[List[float]]:
     return [normalize_vector(vector) for vector in vectors]
 
 
-def embed_text(query: str) -> List[float]:
-    """
-    Text embedding for the Modal search endpoint.
-
-    If you already moved visual search into FastAPI backend, this endpoint
-    may not be used much, but keeping it here is fine.
-    """
-    import torch
-
-    model, processor, device = get_clip_model_and_processor()
-
-    inputs = processor(
-        text=[query],
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    )
-
-    input_ids = inputs.input_ids.to(device)
-    attention_mask = inputs.attention_mask.to(device)
-
-    with torch.no_grad():
-        text_outputs = model.text_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-
-        pooled_output = text_outputs.pooler_output
-        text_features = model.text_projection(pooled_output)
-
-    print(f"[CLIP] text_features shape: {tuple(text_features.shape)}")
-
-    vector = text_features.squeeze(0).detach().cpu().numpy()
-
-    return normalize_vector(vector)
-
-
 def get_pinecone_index():
     from pinecone import Pinecone
 
@@ -585,7 +541,7 @@ def process_video_background(
             job_id=job_id,
             status="processing",
             progress=10,
-            message="Modal started CPU video processing.",
+            message="Modal started video processing.",
             error="",
         )
 
@@ -599,7 +555,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=25,
-                message="Downloading low-resolution YouTube video.",
+                message="Downloading video from YouTube.",
             )
 
             video_path, video_title = download_youtube_video(
@@ -622,7 +578,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=60,
-                message="Creating CPU CLIP embeddings and indexing scenes.",
+                message="Creating CLIP embeddings and indexing scenes.",
             )
 
             update_video_job(
@@ -647,7 +603,7 @@ def process_video_background(
             job_id=job_id,
             status="ready",
             progress=100,
-            message="CPU video scene index ready.",
+            message="Video scene index ready.",
             error="",
         )
 
@@ -662,7 +618,7 @@ def process_video_background(
             job_id=job_id,
             status="failed",
             progress=0,
-            message="CPU video processing failed.",
+            message="Video processing failed.",
             error=str(error),
         )
 
@@ -713,52 +669,4 @@ def start_video_processing(payload: StartVideoRequest):
         "job_id": payload.job_id,
         "modal_call_id": function_call.object_id,
         "message": "CPU video processing started in background.",
-    }
-
-
-@app.function(
-    image=image,
-    timeout=120,
-    secrets=[
-        modal.Secret.from_name("momentum-youtube-v1-secrets"),
-    ],
-)
-@modal.fastapi_endpoint(method="POST")
-def search_visual_scenes(payload: VisualSearchRequest):
-    query_vector = embed_text(payload.query)
-
-    index = get_pinecone_index()
-
-    namespace = payload.youtube_id
-
-    search_response = index.query(
-        vector=query_vector,
-        top_k=payload.top_k,
-        namespace=namespace,
-        include_metadata=True,
-    )
-
-    matches = search_response.get("matches", [])
-
-    results = []
-
-    for match in matches:
-        metadata = match.get("metadata", {})
-
-        results.append({
-            "score": match.get("score"),
-            "timestamp": metadata.get("timestamp"),
-            "timestamp_label": metadata.get("timestamp_label"),
-            "youtube_url": metadata.get("youtube_url"),
-            "scene_index": metadata.get("scene_index"),
-            "scene_start": metadata.get("scene_start"),
-            "scene_end": metadata.get("scene_end"),
-        })
-
-    return {
-        "job_id": payload.job_id,
-        "youtube_id": payload.youtube_id,
-        "query": payload.query,
-        "count": len(results),
-        "results": results,
     }
