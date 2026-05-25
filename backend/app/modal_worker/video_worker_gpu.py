@@ -158,11 +158,6 @@ def download_youtube_video(
     youtube_id: str,
     workdir: str,
 ) -> tuple[str, str]:
-    """
-    Downloads a low-resolution YouTube video for visual indexing.
-
-    For CLIP scene search, 480p is enough and much faster than 1080p.
-    """
     import yt_dlp
 
     normalized_url = f"https://www.youtube.com/watch?v={youtube_id}"
@@ -173,6 +168,8 @@ def download_youtube_video(
     cookies_path = write_youtube_cookies_if_available(workdir)
 
     ydl_opts = {
+        # Prefer mp4 video with audio if available.
+        # Fallback to any best format.
         "format": (
             "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
             "best[height<=480][ext=mp4]/"
@@ -208,6 +205,7 @@ def download_youtube_video(
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(normalized_url, download=True)
         video_title = info.get("title", "Untitled YouTube Video")
+
         downloaded_path = ydl.prepare_filename(info)
 
     possible_files = [
@@ -233,11 +231,6 @@ def download_youtube_video(
 
 
 def detect_scenes(video_path: str) -> List[Dict[str, float]]:
-    """
-    Detects scenes using PySceneDetect.
-
-    threshold=35 reduces excessive tiny cuts and keeps indexing faster.
-    """
     from scenedetect import detect, ContentDetector
 
     raw_scenes = detect(
@@ -280,8 +273,7 @@ def detect_scenes(video_path: str) -> List[Dict[str, float]]:
 def extract_frame_image_at_timestamp(video_path: str, timestamp: float):
     """
     Extracts one frame using OpenCV and returns a PIL RGB image.
-
-    This is faster than starting a new ffmpeg process for every scene.
+    This avoids starting a new ffmpeg process for every scene.
     """
     import cv2
     from PIL import Image
@@ -318,11 +310,6 @@ _clip_device = None
 
 
 def get_clip_model_and_processor():
-    """
-    CPU-only CLIP loader.
-
-    This version intentionally uses CPU so this worker can run without GPU.
-    """
     global _clip_model, _clip_processor, _clip_device
 
     if _clip_model is not None and _clip_processor is not None:
@@ -333,11 +320,7 @@ def get_clip_model_and_processor():
 
     model_name = "openai/clip-vit-base-patch32"
 
-    _clip_device = "cpu"
-
-    # Optional CPU thread tuning.
-    # You can adjust this later depending on Modal CPU allocation.
-    torch.set_num_threads(2)
+    _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"[CLIP] Using device: {_clip_device}")
 
@@ -353,7 +336,10 @@ def get_clip_model_and_processor():
 def normalize_vector(values):
     import numpy as np
 
-    array = np.array(values, dtype="float32").reshape(-1)
+    array = np.array(values, dtype="float32")
+
+    # Force it to be one-dimensional
+    array = array.reshape(-1)
 
     if array.shape[0] != 512:
         raise ValueError(
@@ -368,11 +354,38 @@ def normalize_vector(values):
     return (array / norm).tolist()
 
 
+def embed_image(frame_path: str) -> List[float]:
+    import torch
+    from PIL import Image
+
+    model, processor, device = get_clip_model_and_processor()
+
+    image = Image.open(frame_path).convert("RGB")
+
+    inputs = processor(
+        images=image,
+        return_tensors="pt",
+    )
+
+    pixel_values = inputs.pixel_values.to(device)
+
+    with torch.no_grad():
+        vision_outputs = model.vision_model(pixel_values=pixel_values)
+
+        pooled_output = vision_outputs.pooler_output
+
+        image_features = model.visual_projection(pooled_output)
+
+    print(f"[CLIP] image_features shape: {tuple(image_features.shape)}")
+
+    vector = image_features.squeeze(0).detach().cpu().numpy()
+
+    return normalize_vector(vector)
+
 def embed_images_batch(images) -> List[List[float]]:
     """
-    Embeds multiple PIL images in one CLIP call.
-
-    Even on CPU, batching reduces repeated model-call overhead.
+    Embeds many PIL images at once.
+    This is where GPU becomes useful.
     """
     import torch
 
@@ -399,12 +412,6 @@ def embed_images_batch(images) -> List[List[float]]:
 
 
 def embed_text(query: str) -> List[float]:
-    """
-    Text embedding for the Modal search endpoint.
-
-    If you already moved visual search into FastAPI backend, this endpoint
-    may not be used much, but keeping it here is fine.
-    """
     import torch
 
     model, processor, device = get_clip_model_and_processor()
@@ -426,6 +433,7 @@ def embed_text(query: str) -> List[float]:
         )
 
         pooled_output = text_outputs.pooler_output
+
         text_features = model.text_projection(pooled_output)
 
     print(f"[CLIP] text_features shape: {tuple(text_features.shape)}")
@@ -469,8 +477,7 @@ def index_video_scenes(
 
     scenes = detect_scenes(video_path)
 
-    # CPU version: keep this conservative.
-    # Increase later if you want denser indexing.
+    # Limit while testing. Increase later if needed.
     scenes = scenes[:80]
 
     if not scenes:
@@ -479,9 +486,8 @@ def index_video_scenes(
     image_batch = []
     metadata_batch = []
 
-    # CPU batch size should be smaller than GPU.
-    clip_batch_size = 8
-    pinecone_batch_size = 8
+    clip_batch_size = 16
+    pinecone_batch_size = 16
 
     indexed_count = 0
     pending_vectors = []
@@ -539,6 +545,7 @@ def index_video_scenes(
 
                 pending_vectors.clear()
 
+    # Process remaining images
     if image_batch:
         embeddings = embed_images_batch(image_batch)
 
@@ -549,6 +556,7 @@ def index_video_scenes(
             vector_id = f"{job_id}-{metadata_item['scene_index']}"
             pending_vectors.append((vector_id, embedding, metadata_item))
 
+    # Final Pinecone upsert
     if pending_vectors:
         index.upsert(
             vectors=pending_vectors,
@@ -569,6 +577,7 @@ def index_video_scenes(
 
 @app.function(
     image=image,
+    gpu="T4",
     timeout=60 * 60,
     secrets=[
         modal.Secret.from_name("momentum-youtube-v1-secrets"),
@@ -585,7 +594,7 @@ def process_video_background(
             job_id=job_id,
             status="processing",
             progress=10,
-            message="Modal started CPU video processing.",
+            message=f"Modal started processing",
             error="",
         )
 
@@ -599,7 +608,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=25,
-                message="Downloading low-resolution YouTube video.",
+                message="Downloading YouTube video.",
             )
 
             video_path, video_title = download_youtube_video(
@@ -622,7 +631,7 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=60,
-                message="Creating CPU CLIP embeddings and indexing scenes.",
+                message=f"Creating CLIP embeddings and indexing scenes.",
             )
 
             update_video_job(
@@ -647,7 +656,7 @@ def process_video_background(
             job_id=job_id,
             status="ready",
             progress=100,
-            message="CPU video scene index ready.",
+            message="Video scene index ready.",
             error="",
         )
 
@@ -662,7 +671,7 @@ def process_video_background(
             job_id=job_id,
             status="failed",
             progress=0,
-            message="CPU video processing failed.",
+            message="Video processing failed.",
             error=str(error),
         )
 
@@ -698,7 +707,7 @@ def start_video_processing(payload: StartVideoRequest):
         job_id=payload.job_id,
         status="queued",
         progress=5,
-        message="CPU video processing submitted to Modal.",
+        message="Video processing submitted to Modal.",
         error="",
     )
 
@@ -712,7 +721,7 @@ def start_video_processing(payload: StartVideoRequest):
         "ok": True,
         "job_id": payload.job_id,
         "modal_call_id": function_call.object_id,
-        "message": "CPU video processing started in background.",
+        "message": "Video processing started in background.",
     }
 
 
