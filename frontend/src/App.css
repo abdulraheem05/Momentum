@@ -185,8 +185,8 @@ button {
 }
 
 .custom-icon-slot {
-  width: 20px;
-  height: 20px;
+  width: 25px;
+  height: 25px;
   border-radius: 7px;
   display: grid;
   place-items: center;
@@ -606,18 +606,7 @@ button {
   gap: 14px;
 }
 
-.result-card {
-  display: grid;
-  grid-template-columns: 112px 1fr;
-  gap: 18px;
-  padding: 18px;
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(226, 232, 240, 0.96);
-  box-shadow: 0 20px 58px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(18px);
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
-}
+
 
 .result-card:hover {
   transform: translateY(-2px);
@@ -857,7 +846,7 @@ button {
 }
 
 .chevron {
-  width: 6px;
+  width: 1px;
   height: 16px;
   display: grid;
   place-items: center;
@@ -981,4 +970,60 @@ button {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+.compact-results {
+  width: min(640px, 100%);
+  margin: 28px auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.result-pill {
+  width: min(360px, 100%);
+  min-height: 82px;
+  padding: 16px 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 2px solid rgba(76, 130, 200, 0.356);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-decoration: none;
+  color: #0f172a;
+  backdrop-filter: blur(18px);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.result-pill:hover {
+  transform: translateY(-2px);
+  border-color: rgba(147, 197, 253, 0.95);
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.result-time {
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.result-score {
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.95);
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  padding: 7px 11px;
+  border-radius: 999px;
 }

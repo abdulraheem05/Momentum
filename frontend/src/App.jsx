@@ -317,9 +317,7 @@ export default function App() {
                       {mode === "video" ? "Scene Search" : "Dialogue Search"}
                     </span>
 
-                    <span className="chevron">
-                      <img src="/icons/dropdown.svg" alt="" />
-                    </span>
+                    
                   </button>
 
                   {modeMenuOpen && (
@@ -402,10 +400,8 @@ export default function App() {
               <div className="source-message-content">
                 <div className="source-topline">
                   <span className={cx("mode-pill", mode)}>
-                    <span className="custom-icon-slot" aria-hidden="true">
-                      {mode === "video" ? "▣" : "◖"}
-                    </span>
-                    {selectedMode.label} search
+                    
+                    {selectedMode.label}
                   </span>
 
                   <button className="text-reset" onClick={resetWorkspace}>
@@ -519,41 +515,41 @@ export default function App() {
                 )}
 
                 {!isSearching && results.length > 0 && (
-                  <div className="result-list">
-                    {results.map((item, index) => (
-                      <article key={`${item.timestamp}-${index}`} className="result-card">
-                        <div className="result-time-column">
-                          <span className="result-index">{String(index + 1).padStart(2, "0")}</span>
-                          <a
-                            href={item.youtube_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="timestamp-link"
-                          >
-                            {item.timestamp_label || `${Math.round(item.timestamp || 0)}s`}
-                          </a>
-                        </div>
+                  <div className="results-list compact-results">
+                    {results.map((result, index) => {
+                      const timestamp =
+                        result.timestamp_label ||
+                        result.time_label ||
+                        formatTimestamp(result.timestamp || result.start_time || result.start || 0);
 
-                        <div className="result-body">
-                          <p>{createResultLabel(mode, item, index)}</p>
+                      const score =
+                        result.score_percent ||
+                        result.match_percent ||
+                        result.similarity_percent ||
+                        Math.round((result.score || result.similarity || 0) * 100);
 
-                          {mode === "video" && (
-                            <div className="result-meta">
-                              <span>{formatScore(item.score) || "Visual similarity match"}</span>
-                              {item.scene_start !== undefined && item.scene_end !== undefined && (
-                                <span>
-                                  Scene range {Math.round(item.scene_start)}s - {Math.round(item.scene_end)}s
-                                </span>
-                              )}
-                            </div>
-                          )}
+                      const youtubeUrl =
+                        result.youtube_url ||
+                        result.url ||
+                        result.timestamp_url ||
+                        buildYouTubeTimestampUrl(
+                          job?.youtube_url || youtubeUrl,
+                          result.timestamp || result.start_time || result.start || 0
+                        );
 
-                          <a href={item.youtube_url} target="_blank" rel="noreferrer" className="watch-link">
-                            Open YouTube from this timestamp
-                          </a>
-                        </div>
-                      </article>
-                    ))}
+                      return (
+                        <a
+                          key={`${timestamp}-${index}`}
+                          className="result-pill"
+                          href={youtubeUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <span className="result-time">{timestamp}</span>
+                          <span className="result-score">{score}% match</span>
+                        </a>
+                      );
+                    })}
                   </div>
                 )}
               </section>
