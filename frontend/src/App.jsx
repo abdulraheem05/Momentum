@@ -66,6 +66,17 @@ function buildWatchUrl(youtubeId) {
   return youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : "";
 }
 
+async function fetchYouTubeMetadata(url) {
+  const response = await axios.get("https://www.youtube.com/oembed", {
+    params: {
+      url,
+      format: "json",
+    },
+  });
+
+  return response.data;
+}
+
 function cleanApiLabel() {
   return API.replace("https://", "").replace("http://", "").replace(/\/$/, "");
 }
@@ -83,6 +94,26 @@ function getThinkingTitle(job, selectedMode, isCreatingJob) {
   }
   if (job.status === "failed") return "Processing failed";
   return job.message || "Momentum is processing";
+}
+
+function getProgressColor(progress) {
+  if (progress < 25) {
+    return "linear-gradient(180deg, #dbeafe 0%, #93c5fd 100%)";
+  }
+
+  if (progress < 50) {
+    return "linear-gradient(180deg, #bfdbfe 0%, #60a5fa 100%)";
+  }
+
+  if (progress < 75) {
+    return "linear-gradient(180deg, #c4b5fd 0%, #818cf8 100%)";
+  }
+
+  if (progress < 100) {
+    return "linear-gradient(180deg, #ddd6fe 0%, #a78bfa 100%)";
+  }
+
+  return "linear-gradient(180deg, #bbf7d0 0%, #22c55e 100%)";
 }
 
 function createResultLabel(mode, item, index) {
@@ -107,7 +138,10 @@ export default function App() {
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
-  const [thinkingFeed, setThinkingFeed] = useState([]);
+  const [currentVerbose, setCurrentVerbose] = useState("Waiting to start...");
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [videoMeta, setVideoMeta] = useState(null);
+  const [isFetchingMeta, setIsFetchingMeta] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
 
   const pollRef = useRef(null);
@@ -115,36 +149,87 @@ export default function App() {
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
   const previewYoutubeId = useMemo(() => getYouTubeId(youtubeUrl), [youtubeUrl]);
+  const videoTitle =
+    videoMeta?.title ||
+    job?.video_title ||
+    job?.title ||
+    job?.youtube_title ||
+    job?.metadata?.title ||
+    "YouTube video";
+
   const progress = clampProgress(job?.progress);
   const isReady = job?.status === "ready";
   const isFailed = job?.status === "failed";
   const hasStarted = Boolean(jobId || job || isCreatingJob);
   const selectedMode = MODE_OPTIONS[mode];
-  
 
   useEffect(() => {
     return () => stopPolling();
   }, []);
 
   useEffect(() => {
+    const cleanUrl = youtubeUrl.trim();
+    const cleanYoutubeId = getYouTubeId(cleanUrl);
+
+    if (!cleanUrl || !cleanYoutubeId) {
+      setVideoMeta(null);
+      setIsFetchingMeta(false);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      try {
+        setIsFetchingMeta(true);
+
+        const data = await fetchYouTubeMetadata(cleanUrl);
+
+        setVideoMeta({
+          title: data.title,
+          author: data.author_name,
+          thumbnail: data.thumbnail_url,
+        });
+      } catch {
+        setVideoMeta({
+          title: "YouTube video",
+          author: "",
+          thumbnail: `https://img.youtube.com/vi/${cleanYoutubeId}/hqdefault.jpg`,
+        });
+      } finally {
+        setIsFetchingMeta(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [youtubeUrl]);
+
+  useEffect(() => {
     if (!job?.message && !job?.status) return;
 
     const message = job?.message || `Status changed to ${job.status}`;
+    setCurrentVerbose(message);
+  }, [job?.message, job?.status]);
 
-    setThinkingFeed((prev) => {
-      if (prev[0]?.message === message && prev[0]?.progress === progress) return prev;
+  useEffect(() => {
+    const target = progress;
 
-      return [
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          message,
-          status: job.status,
-          progress,
-        },
-        ...prev,
-      ].slice(0, 5);
-    });
-  }, [job?.message, job?.status, progress]);
+    const interval = setInterval(() => {
+      setDisplayProgress((current) => {
+        if (current === target) {
+          clearInterval(interval);
+          return current;
+        }
+
+        if (current < target) {
+          return Math.min(current + 1, target);
+        }
+
+        return Math.max(current - 1, target);
+      });
+    }, 18);
+
+    return () => clearInterval(interval);
+  }, [progress]);
+
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -199,7 +284,8 @@ export default function App() {
       setQuery("");
       setJob(null);
       setJobId("");
-      setThinkingFeed([]);
+      setCurrentVerbose("Creating Momentum job...");
+      setDisplayProgress(0);
       setSubmittedUrl(cleanUrl);
       setIsCreatingJob(true);
 
@@ -275,7 +361,10 @@ export default function App() {
     setIsCreatingJob(false);
     setIsSearching(false);
     setError("");
-    setThinkingFeed([]);
+    setCurrentVerbose("Waiting to start...");
+    setDisplayProgress(0);
+    setVideoMeta(null);
+    setIsFetchingMeta(false);
   };
 
   return (
@@ -370,12 +459,18 @@ export default function App() {
             {previewYoutubeId && !hasStarted && (
               <div className="instant-preview">
                 <img
-                  src={`https://img.youtube.com/vi/${previewYoutubeId}/mqdefault.jpg`}
+                  src={videoMeta?.thumbnail || `https://img.youtube.com/vi/${previewYoutubeId}/mqdefault.jpg`}
                   alt="YouTube thumbnail preview"
                 />
                 <div>
-                  <strong>YouTube video detected</strong>
-                  <span>{buildWatchUrl(previewYoutubeId)}</span>
+                  <strong>
+                    {isFetchingMeta ? "Fetching video title..." : videoMeta?.title || "YouTube video detected"}
+                  </strong>
+
+                  <span>
+                    {videoMeta?.author ? `${videoMeta.author} · ` : ""}
+                    {buildWatchUrl(previewYoutubeId)}
+                  </span>
                 </div>
               </div>
             )}
@@ -409,7 +504,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <h2>{job?.video_title || "YouTube video"}</h2>
+                <h2>{videoTitle}</h2>
                 <a href={buildWatchUrl(youtubeId)} target="_blank" rel="noreferrer">
                   {submittedUrl || buildWatchUrl(youtubeId)}
                 </a>
@@ -419,13 +514,22 @@ export default function App() {
             <section className="thinking-stage">
               <div
                 className={cx("liquid-orb", isReady && "complete", isFailed && "failed")}
-                style={{ "--progress": `${progress}%` }}
-                aria-label={`Processing progress ${progress}%`}
+                style={{
+                  "--progress": `${displayProgress}%`,
+                  "--fill-color": getProgressColor(displayProgress),
+                }}
+                aria-label={`Processing progress ${displayProgress}%`}
               >
                 <div className="liquid" />
                 <div className="orb-glass" />
                 <div className="orb-content">
-                  {isReady ? <span className="tick-mark">✓</span> : isFailed ? <span>!</span> : <span>{progress}</span>}
+                  {isReady ? (
+                      <span className="tick-mark">✓</span>
+                    ) : isFailed ? (
+                      <span>!</span>
+                    ) : (
+                      <span>{displayProgress}</span>
+                    )}
                 </div>
               </div>
 
@@ -441,19 +545,8 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="verbose-stack">
-                  {thinkingFeed.length === 0 ? (
-                    <p className="verbose-item active">Connecting to Modal worker...</p>
-                  ) : (
-                    thinkingFeed.map((item, index) => (
-                      <p
-                        key={item.id}
-                        className={cx("verbose-item", index === 0 && "active")}
-                      >
-                        {item.message}
-                      </p>
-                    ))
-                  )}
+                <div className="verbose-single" key={currentVerbose}>
+                  <p className="verbose-item active">{currentVerbose}</p>
                 </div>
               </div>
             </section>
@@ -471,13 +564,7 @@ export default function App() {
 
                 <div className="gemini-composer query-composer">
                   <div className="composer-input-row">
-                    <div className={cx("mode-chip", mode)}>
-                      <span className="custom-icon-slot" aria-hidden="true">
-                        {mode === "video" ? "▣" : "◖"}
-                      </span>
-                      <span>{selectedMode.label}</span>
-                    </div>
-
+                    
                     <input
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
