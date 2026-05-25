@@ -127,6 +127,20 @@ function createResultLabel(mode, item, index) {
   return score ? `${scene} · ${score}` : scene;
 }
 
+function formatDuration(ms) {
+  if (!ms) return "";
+
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes} min ${seconds} sec`;
+  }
+
+  return `${seconds} sec`;
+}
+
 export default function App() {
   const [mode, setMode] = useState("video");
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -143,6 +157,8 @@ export default function App() {
   const [videoMeta, setVideoMeta] = useState(null);
   const [isFetchingMeta, setIsFetchingMeta] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [processingStartTime, setProcessingStartTime] = useState(null);
+  const [processingDuration, setProcessingDuration] = useState(null);
 
   const pollRef = useRef(null);
 
@@ -205,9 +221,12 @@ export default function App() {
   useEffect(() => {
     if (!job?.message && !job?.status) return;
 
+    if (job?.status === "ready" && processingDuration) return;
+    if (job?.status === "failed" && processingDuration) return;
+
     const message = job?.message || `Status changed to ${job.status}`;
     setCurrentVerbose(message);
-  }, [job?.message, job?.status]);
+  }, [job?.message, job?.status, processingDuration]);
 
   useEffect(() => {
     const target = progress;
@@ -250,6 +269,25 @@ export default function App() {
 
         if (latestJob.status === "ready" || latestJob.status === "failed") {
           stopPolling();
+
+          setProcessingStartTime((startedAt) => {
+            if (startedAt) {
+              const duration = Date.now() - startedAt;
+              setProcessingDuration(duration);
+
+              if (latestJob.status === "ready") {
+                setCurrentVerbose(
+                  `Task completed in ${formatDuration(duration)}. You can now search this video.`
+                );
+              } else {
+                setCurrentVerbose(
+                  `Task stopped after ${formatDuration(duration)} because processing failed.`
+                );
+              }
+            }
+
+            return startedAt;
+          });
         }
       } catch (err) {
         stopPolling();
@@ -279,11 +317,17 @@ export default function App() {
     }
 
     try {
+      const startedAt = Date.now();
+
       setError("");
       setResults([]);
       setQuery("");
       setJob(null);
       setJobId("");
+
+      setProcessingStartTime(startedAt);
+      setProcessingDuration(null);
+
       setCurrentVerbose("Creating Momentum job...");
       setDisplayProgress(0);
       setSubmittedUrl(cleanUrl);
@@ -365,6 +409,8 @@ export default function App() {
     setDisplayProgress(0);
     setVideoMeta(null);
     setIsFetchingMeta(false);
+    setProcessingStartTime(null);
+    setProcessingDuration(null);
   };
 
   return (
