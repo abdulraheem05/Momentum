@@ -498,10 +498,6 @@ export default function App() {
                     
                     {selectedMode.label}
                   </span>
-
-                  <button className="text-reset" onClick={resetWorkspace}>
-                    New video
-                  </button>
                 </div>
 
                 <h2>{videoTitle}</h2>
@@ -602,6 +598,7 @@ export default function App() {
                 )}
 
                 {!isSearching && results.length > 0 && (
+                  <>
                   <div className="results-list compact-results">
                     {results.map((result, index) => {
                       const timestamp =
@@ -634,10 +631,20 @@ export default function App() {
                         >
                           <span className="result-time">{timestamp}</span>
                           <span className="result-score">{score}% match</span>
-                        </a>
-                      );
+                        </a> 
+                      ); 
                     })}
                   </div>
+                  <div className="new-video-action">
+                    <button
+                      type="button"
+                      className="search-new-video-button"
+                      onClick={resetWorkspace}
+                    >
+                      Search new video
+                    </button>
+                  </div>
+                  </>
                 )}
               </section>
             )}

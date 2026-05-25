@@ -1001,3 +1001,32 @@ button {
   padding: 7px 11px;
   border-radius: 999px;
 }
+
+.new-video-action {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.search-new-video-button {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.1);
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.search-new-video-button:hover {
+  transform: translateY(-1px);
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.search-new-video-button:active {
+  transform: translateY(0);
+}
