@@ -54,14 +54,12 @@ def get_supabase_client():
     return create_client(supabase_url, supabase_key)
 
 
-def update_job(
+def update_parent_job(
     job_id: str,
     status: str | None = None,
     progress: int | None = None,
     message: str | None = None,
     error: str | None = None,
-    transcript_blob_name: str | None = None,
-    transcript_blob_url: str | None = None,
     video_title: str | None = None,
 ) -> None:
     supabase = get_supabase_client()
@@ -82,12 +80,6 @@ def update_job(
     if error is not None:
         data["error"] = error
 
-    if transcript_blob_name is not None:
-        data["transcript_blob_name"] = transcript_blob_name
-
-    if transcript_blob_url is not None:
-        data["transcript_blob_url"] = transcript_blob_url
-
     if video_title is not None:
         data["video_title"] = video_title
 
@@ -96,6 +88,35 @@ def update_job(
         .table("youtube_jobs")
         .update(data)
         .eq("id", job_id)
+        .execute()
+    )
+
+def update_audio_job(
+    job_id: str,
+    audio_status: str | None = None,
+    transcript_blob_name: str | None = None,
+    transcript_blob_url: str | None = None,
+) -> None:
+    supabase = get_supabase_client()
+
+    data: Dict[str, Any] = {
+        "updated_at": now_iso(),
+    }
+
+    if audio_status is not None:
+        data["audio_status"] = audio_status
+
+    if transcript_blob_name is not None:
+        data["transcript_blob_name"] = transcript_blob_name
+
+    if transcript_blob_url is not None:
+        data["transcript_blob_url"] = transcript_blob_url
+
+    (
+        supabase
+        .table("youtube_audio_jobs")
+        .update(data)
+        .eq("job_id", job_id)
         .execute()
     )
 
@@ -272,24 +293,22 @@ def process_youtube_video_background(
     youtube_url: str,
     youtube_id: str,
 ) -> Dict[str, Any]:
-    """
-    Background worker.
-
-    This function does the heavy work. It is NOT exposed as a web endpoint.
-    The public endpoint only spawns this function and returns immediately.
-    """
-
     try:
-        update_job(
+        update_parent_job(
             job_id=job_id,
             status="processing",
             progress=10,
-            message="Worker started.",
+            message="Audio worker started.",
             error="",
         )
 
+        update_audio_job(
+            job_id=job_id,
+            audio_status="processing",
+        )
+
         with tempfile.TemporaryDirectory() as workdir:
-            update_job(
+            update_parent_job(
                 job_id=job_id,
                 status="processing",
                 progress=25,
@@ -301,12 +320,17 @@ def process_youtube_video_background(
                 workdir=workdir,
             )
 
-            update_job(
+            update_parent_job(
                 job_id=job_id,
-                status="transcribing",
+                status="processing",
                 progress=55,
                 message="Audio extracted. Transcribing with Groq.",
                 video_title=video_title,
+            )
+
+            update_audio_job(
+                job_id=job_id,
+                audio_status="transcribing",
             )
 
             segments = transcribe_with_groq(audio_path)
@@ -320,11 +344,16 @@ def process_youtube_video_background(
                 "segments": segments,
             }
 
-            update_job(
+            update_parent_job(
                 job_id=job_id,
-                status="uploading",
+                status="processing",
                 progress=85,
                 message="Transcription complete. Uploading transcript JSON.",
+            )
+
+            update_audio_job(
+                job_id=job_id,
+                audio_status="uploading",
             )
 
             blob_name, blob_url = upload_transcript_to_azure(
@@ -332,13 +361,18 @@ def process_youtube_video_background(
                 transcript_data=transcript_data,
             )
 
-        update_job(
+        update_audio_job(
+            job_id=job_id,
+            audio_status="ready",
+            transcript_blob_name=blob_name,
+            transcript_blob_url=blob_url,
+        )
+
+        update_parent_job(
             job_id=job_id,
             status="ready",
             progress=100,
             message="Transcript ready.",
-            transcript_blob_name=blob_name,
-            transcript_blob_url=blob_url,
             video_title=video_title,
             error="",
         )
@@ -351,12 +385,17 @@ def process_youtube_video_background(
         }
 
     except Exception as error:
-        update_job(
+        update_parent_job(
             job_id=job_id,
             status="failed",
             progress=0,
-            message="Processing failed.",
+            message="Audio processing failed.",
             error=str(error),
+        )
+
+        update_audio_job(
+            job_id=job_id,
+            audio_status="failed",
         )
 
         return {
@@ -389,12 +428,17 @@ def start_youtube_processing(payload: ProcessYouTubeRequest):
         youtube_id=payload.youtube_id,
     )
 
-    update_job(
+    update_parent_job(
         job_id=payload.job_id,
         status="queued",
         progress=5,
-        message="Processing job submitted to Modal.",
+        message="Audio processing job submitted to Modal.",
         error="",
+    )
+
+    update_audio_job(
+        job_id=payload.job_id,
+        audio_status="queued",
     )
 
     return {

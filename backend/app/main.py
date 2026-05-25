@@ -122,10 +122,16 @@ def search_dialogue(payload: SearchDialogueRequest):
     """
 
     try:
-        job = get_youtube_job_by_id(payload.job_id)
+        job = get_youtube_job_with_details(payload.job_id)
 
         if not job:
             raise HTTPException(status_code=404, detail="Job not found.")
+        
+        if job["mode"] != "audio":
+            raise HTTPException(
+                status_code=400,
+                detail="This job is not an audio search job.",
+            )
 
         if job["status"] != "ready":
             raise HTTPException(
@@ -133,7 +139,15 @@ def search_dialogue(payload: SearchDialogueRequest):
                 detail=f"Job is not ready yet. Current status: {job['status']}",
             )
 
-        blob_name = job.get("transcript_blob_name")
+        audio_details = job.get("audio_details")
+
+        if not audio_details:
+            raise HTTPException(
+                status_code=500,
+                detail="Audio details are missing for this job.",
+            )
+
+        blob_name = audio_details.get("transcript_blob_name")
 
         if not blob_name:
             raise HTTPException(
