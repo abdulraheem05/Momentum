@@ -4,29 +4,49 @@ import "./App.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-const PROCESS_STEPS = [
-  { key: "queued", label: "Job queued", hint: "Preparing the worker" },
-  { key: "processing", label: "Audio extraction", hint: "Downloading and extracting audio" },
-  { key: "transcribing", label: "Transcription", hint: "Detecting spoken dialogue" },
-  { key: "uploading", label: "Saving transcript", hint: "Uploading timestamped transcript" },
-  { key: "ready", label: "Ready", hint: "Search is available" },
+const MODE_OPTIONS = {
+  video: {
+    label: "Scene Search",
+    helper: "Find visual scenes using CLIP embeddings",
+    placeholder: "Describe the scene you want to find...",
+    searchEndpoint: "/youtube/search-visual",
+  },
+  audio: {
+    label: "Dialogue Search",
+    helper: "Find spoken dialogue from transcript",
+    placeholder: "Type the dialogue or phrase you remember...",
+    searchEndpoint: "/youtube/search-dialogue",
+  },
+};
+
+const SEARCH_MODES = [
+  {
+    id: "video",
+    label: "Scene Search",
+    description: "Search scenes visually",
+  },
+  {
+    id: "audio",
+    label: "Dialogue Search",
+    description: "Search spoken dialogue",
+  },
 ];
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function formatProgress(value) {
+function clampProgress(value) {
   const n = Number(value || 0);
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 function getYouTubeId(url) {
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(url.trim());
 
     if (parsed.hostname.includes("youtu.be")) {
-      return parsed.pathname.replace("/", "");
+      return parsed.pathname.replace("/", "").split("?")[0];
     }
 
     if (parsed.searchParams.get("v")) {
@@ -42,15 +62,44 @@ function getYouTubeId(url) {
   }
 }
 
-function getStatusTone(status) {
-  if (status === "ready") return "success";
-  if (status === "failed") return "danger";
-  if (status === "transcribing") return "accent";
-  return "default";
+function buildWatchUrl(youtubeId) {
+  return youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : "";
+}
+
+function cleanApiLabel() {
+  return API.replace("https://", "").replace("http://", "").replace(/\/$/, "");
+}
+
+function formatScore(score) {
+  if (score === null || score === undefined || Number.isNaN(Number(score))) return "";
+  return `${Math.round(Number(score) * 100)}% match`;
+}
+
+function getThinkingTitle(job, selectedMode, isCreatingJob) {
+  if (isCreatingJob) return "Creating Momentum job";
+  if (!job) return "Waiting for a YouTube URL";
+  if (job.status === "ready") {
+    return selectedMode === "video" ? "Video scene index ready" : "Audio transcript ready";
+  }
+  if (job.status === "failed") return "Processing failed";
+  return job.message || "Momentum is processing";
+}
+
+function createResultLabel(mode, item, index) {
+  if (mode === "audio") return item.text || "Detected dialogue";
+
+  const scene = item.scene_index !== undefined && item.scene_index !== null
+    ? `Scene ${item.scene_index}`
+    : `Visual match ${index + 1}`;
+
+  const score = formatScore(item.score);
+  return score ? `${scene} · ${score}` : scene;
 }
 
 export default function App() {
+  const [mode, setMode] = useState("video");
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [submittedUrl, setSubmittedUrl] = useState("");
   const [jobId, setJobId] = useState("");
   const [job, setJob] = useState(null);
   const [query, setQuery] = useState("");
@@ -58,62 +107,44 @@ export default function App() {
   const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
-  const [activityLog, setActivityLog] = useState([]);
+  const [thinkingFeed, setThinkingFeed] = useState([]);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
 
   const pollRef = useRef(null);
 
-  const progress = formatProgress(job?.progress);
-  const status = job?.status || "";
-  const isReady = status === "ready";
-  const isFailed = status === "failed";
-  const youtubeId = useMemo(() => getYouTubeId(youtubeUrl), [youtubeUrl]);
-
-  const currentStepIndex = useMemo(() => {
-    if (!status) return -1;
-
-    const exactIndex = PROCESS_STEPS.findIndex((step) => step.key === status);
-    if (exactIndex !== -1) return exactIndex;
-
-    if (progress >= 100) return PROCESS_STEPS.length - 1;
-    if (progress >= 85) return 3;
-    if (progress >= 55) return 2;
-    if (progress >= 10) return 1;
-    return 0;
-  }, [status, progress]);
+  const activeUrl = submittedUrl || youtubeUrl;
+  const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
+  const previewYoutubeId = useMemo(() => getYouTubeId(youtubeUrl), [youtubeUrl]);
+  const progress = clampProgress(job?.progress);
+  const isReady = job?.status === "ready";
+  const isFailed = job?.status === "failed";
+  const hasStarted = Boolean(jobId || job || isCreatingJob);
+  const selectedMode = MODE_OPTIONS[mode];
+  
 
   useEffect(() => {
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-      }
-    };
+    return () => stopPolling();
   }, []);
 
   useEffect(() => {
-    if (!job?.message && !status) return;
+    if (!job?.message && !job?.status) return;
 
-    const text = job?.message || `Status updated to ${status}`;
+    const message = job?.message || `Status changed to ${job.status}`;
 
-    setActivityLog((prev) => {
-      const last = prev[0];
-      if (last?.text === text && last?.status === status) return prev;
+    setThinkingFeed((prev) => {
+      if (prev[0]?.message === message && prev[0]?.progress === progress) return prev;
 
       return [
         {
           id: `${Date.now()}-${Math.random()}`,
-          text,
-          status: status || "info",
+          message,
+          status: job.status,
           progress,
-          time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
         },
         ...prev,
-      ].slice(0, 8);
+      ].slice(0, 5);
     });
-  }, [job?.message, status, progress]);
+  }, [job?.message, job?.status, progress]);
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -139,24 +170,25 @@ export default function App() {
         stopPolling();
         setError(
           err?.response?.data?.detail ||
-            "Could not check the job status. Please make sure the backend is running."
+            "Could not read the job status. Check whether the backend is running."
         );
       }
     };
 
     fetchJob();
-    pollRef.current = setInterval(fetchJob, 2500);
+    pollRef.current = setInterval(fetchJob, 2400);
   };
 
   const startProcessing = async () => {
     const cleanUrl = youtubeUrl.trim();
+    const cleanYoutubeId = getYouTubeId(cleanUrl);
 
     if (!cleanUrl) {
       setError("Paste a YouTube URL first.");
       return;
     }
 
-    if (!getYouTubeId(cleanUrl)) {
+    if (!cleanYoutubeId) {
       setError("This does not look like a valid YouTube URL.");
       return;
     }
@@ -164,40 +196,44 @@ export default function App() {
     try {
       setError("");
       setResults([]);
+      setQuery("");
       setJob(null);
       setJobId("");
-      setActivityLog([]);
+      setThinkingFeed([]);
+      setSubmittedUrl(cleanUrl);
       setIsCreatingJob(true);
 
       const response = await axios.post(`${API}/youtube/jobs`, {
         youtube_url: cleanUrl,
+        mode,
       });
 
       setJobId(response.data.job_id);
       setJob({
         id: response.data.job_id,
+        youtube_id: response.data.youtube_id,
+        mode: response.data.mode || mode,
         status: response.data.status || "queued",
         progress: response.data.progress || 0,
-        message: response.data.message || "Job created.",
-        youtube_id: response.data.youtube_id,
+        message: response.data.message || `${MODE_OPTIONS[mode].label} job created.`,
       });
 
       pollJob(response.data.job_id);
     } catch (err) {
       setError(
         err?.response?.data?.detail ||
-          "Could not start processing. Check your backend, Modal URL, cookies, and API keys."
+          "Could not start processing. Check your backend URL, Modal endpoint, and environment variables."
       );
     } finally {
       setIsCreatingJob(false);
     }
   };
 
-  const searchDialogue = async () => {
+  const searchMomentum = async () => {
     const cleanQuery = query.trim();
 
     if (!cleanQuery) {
-      setError("Type the dialogue or phrase you want to find.");
+      setError(mode === "video" ? "Describe the visual scene you want to find." : "Type the dialogue you want to find.");
       return;
     }
 
@@ -211,7 +247,7 @@ export default function App() {
       setIsSearching(true);
       setResults([]);
 
-      const response = await axios.post(`${API}/youtube/search-dialogue`, {
+      const response = await axios.post(`${API}${selectedMode.searchEndpoint}`, {
         job_id: jobId,
         query: cleanQuery,
       });
@@ -220,7 +256,7 @@ export default function App() {
     } catch (err) {
       setError(
         err?.response?.data?.detail ||
-          "Search failed. The transcript may not be ready yet."
+          `Could not search ${mode === "video" ? "visual scenes" : "audio dialogue"}.`
       );
     } finally {
       setIsSearching(false);
@@ -229,324 +265,306 @@ export default function App() {
 
   const resetWorkspace = () => {
     stopPolling();
+    setMode("video");
     setYoutubeUrl("");
+    setSubmittedUrl("");
     setJobId("");
     setJob(null);
     setQuery("");
     setResults([]);
+    setIsCreatingJob(false);
+    setIsSearching(false);
     setError("");
-    setActivityLog([]);
+    setThinkingFeed([]);
   };
 
   return (
-    <div className="momentum-app">
-
-      <header className="topbar">
-        <div className="brand">
-          <div className="brandMark">M</div>
-          <div>
+    <div className={cx("momentum-app", hasStarted && "conversation-mode")}>
+      <main className="momentum-shell">
+        <section className="intro-panel">
+          <div className="brand-center">
             <h1>Momentum</h1>
-            <p>YouTube dialogue intelligence</p>
-          </div>
-        </div>
-
-        <div className="apiPill">
-          <span className="pulseDot" />
-          {API.replace("https://", "").replace("http://", "")}
-        </div>
-      </header>
-
-      <main className="shell">
-        <section className="hero">
-          <div className="heroCopy">
-            <div className="eyebrow">AI transcript search</div>
-            <h2>Find the exact moment a dialogue appears in a YouTube video.</h2>
-            <p>
-              Paste a YouTube link, let Momentum process the audio, then search
-              for remembered phrases with clickable timestamp results.
-            </p>
+            <p>Search any YouTube video by what you see or what you hear.</p>
           </div>
 
-          <div className="heroCard">
-            <div className="inputHeader">
-              <div>
-                <label>YouTube URL</label>
-                <p>Paste a public YouTube video link</p>
-              </div>
-
-              {youtubeId && (
-                <a
-                  href={`https://www.youtube.com/watch?v=${youtubeId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tinyLink"
-                >
-                  Open source
-                </a>
-              )}
-            </div>
-
-            <div className="urlInputWrap">
+          <div className="gemini-composer source-composer">
+            <div className="composer-input-row">
               <input
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-                disabled={isCreatingJob || (!!jobId && !isFailed && !isReady)}
+                placeholder="Paste a YouTube URL"
+                disabled={isCreatingJob || (!!jobId && !isFailed)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") startProcessing();
                 }}
               />
-            </div>
+              <label className={cx("mode-dropdown", mode)}>
+                <div className="mode-picker">
+                  <button
+                    type="button"
+                    className="mode-trigger"
+                    onClick={() => setModeMenuOpen((prev) => !prev)}
+                  >
+                    <span className="mode-icon-slot">
+                      {mode === "video" ? (
+                        <img src="/icons/video.svg" alt="" />
+                      ) : (
+                        <img src="/icons/audio.svg" alt="" />
+                      )}
+                    </span>
 
-            <div className="actions">
+                    <span className="mode-trigger-label">
+                      {mode === "video" ? "Scene Search" : "Dialogue Search"}
+                    </span>
+
+                    <span className="chevron">
+                      <img src="/icons/dropdown.svg" alt="" />
+                    </span>
+                  </button>
+
+                  {modeMenuOpen && (
+                    <div className="mode-menu">
+                      {SEARCH_MODES.map((item) => {
+                        const selected = mode === item.id;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={selected ? "mode-menu-item selected" : "mode-menu-item"}
+                            onClick={() => {
+                              setMode(item.id);
+                              setModeMenuOpen(false);
+                            }}
+                          >
+                            <span className="mode-icon-slot menu-icon">
+                              {item.id === "video" ? (
+                                <img src="/icons/video.svg" alt="" />
+                              ) : (
+                                <img src="/icons/audio.svg" alt="" />
+                              )}
+                            </span>
+
+                            <span className="mode-copy">
+                              <strong>{item.label}</strong>
+                              <small>{item.description}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+              </label>
+
               <button
-                className="primaryBtn"
+                className="send-button"
                 onClick={startProcessing}
-                disabled={isCreatingJob || (!!jobId && !isFailed && !isReady)}
+                disabled={isCreatingJob || (!!jobId && !isFailed)}
+                aria-label="Start processing"
               >
-                {isCreatingJob ? (
-                  <>
-                    <span className="miniSpinner" />
-                    Creating job
-                  </>
-                ) : (
-                  "Start processing"
-                )}
-              </button>
-
-              <button className="ghostBtn" onClick={resetWorkspace}>
-                Reset
+                {isCreatingJob ? <span className="button-spinner" /> : "➜"}
               </button>
             </div>
 
-            {youtubeId && (
-              <div className="previewStrip">
+
+            {previewYoutubeId && !hasStarted && (
+              <div className="instant-preview">
                 <img
-                  src={`https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg`}
-                  alt="YouTube thumbnail"
+                  src={`https://img.youtube.com/vi/${previewYoutubeId}/mqdefault.jpg`}
+                  alt="YouTube thumbnail preview"
                 />
                 <div>
-                  <span>Detected video</span>
-                  <strong>{youtubeId}</strong>
+                  <strong>YouTube video detected</strong>
+                  <span>{buildWatchUrl(previewYoutubeId)}</span>
                 </div>
               </div>
             )}
           </div>
+
+          {error && (
+            <div className="error-message">
+              <strong>Attention</strong>
+              <span>{error}</span>
+            </div>
+          )}
         </section>
 
-        {error && (
-          <div className="errorBox">
-            <strong>Something needs attention</strong>
-            <span>{error}</span>
-          </div>
-        )}
+        {hasStarted && (
+          <section className="conversation-panel">
+            <article className="source-message">
+              <img
+                src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
+                alt="Processed YouTube video thumbnail"
+              />
 
-        {(job || isCreatingJob) && (
-          <section className="processingGrid">
-            <div className="progressCard">
-              <div className="progressTop">
-                <div>
-                  <span className="sectionLabel">Processing status</span>
-                  <h3>{job?.video_title || "Preparing video transcript"}</h3>
+              <div className="source-message-content">
+                <div className="source-topline">
+                  <span className={cx("mode-pill", mode)}>
+                    <span className="custom-icon-slot" aria-hidden="true">
+                      {mode === "video" ? "▣" : "◖"}
+                    </span>
+                    {selectedMode.label} search
+                  </span>
+
+                  <button className="text-reset" onClick={resetWorkspace}>
+                    New video
+                  </button>
                 </div>
 
-                <div
-                  className="progressRing"
-                  style={{
-                    "--progress": `${progress}%`,
-                  }}
-                >
-                  <div>
-                    <strong>{progress}</strong>
-                    <span>%</span>
-                  </div>
+                <h2>{job?.video_title || "YouTube video"}</h2>
+                <a href={buildWatchUrl(youtubeId)} target="_blank" rel="noreferrer">
+                  {submittedUrl || buildWatchUrl(youtubeId)}
+                </a>
+              </div>
+            </article>
+
+            <section className="thinking-stage">
+              <div
+                className={cx("liquid-orb", isReady && "complete", isFailed && "failed")}
+                style={{ "--progress": `${progress}%` }}
+                aria-label={`Processing progress ${progress}%`}
+              >
+                <div className="liquid" />
+                <div className="orb-glass" />
+                <div className="orb-content">
+                  {isReady ? <span className="tick-mark">✓</span> : isFailed ? <span>!</span> : <span>{progress}</span>}
                 </div>
               </div>
 
-              <div className={cx("statusBadge", getStatusTone(status))}>
-                {status || "creating"}
+              <div className="thinking-copy">
+                <div className="thinking-line-main">
+                  <span>{getThinkingTitle(job, mode, isCreatingJob)}</span>
+                  {!isReady && !isFailed && (
+                    <span className="typing-dots" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  )}
+                </div>
+
+                <div className="verbose-stack">
+                  {thinkingFeed.length === 0 ? (
+                    <p className="verbose-item active">Connecting to Modal worker...</p>
+                  ) : (
+                    thinkingFeed.map((item, index) => (
+                      <p
+                        key={item.id}
+                        className={cx("verbose-item", index === 0 && "active")}
+                      >
+                        {item.message}
+                      </p>
+                    ))
+                  )}
+                </div>
               </div>
+            </section>
 
-              <p className="jobMessage">
-                {job?.message ||
-                  "Creating the job and connecting to the worker..."}
-              </p>
+            {isReady && (
+              <section className="query-section">
+                <div className="query-heading">
+                  <h3>{mode === "video" ? "Describe a scene" : "Search the dialogue"}</h3>
+                  <p>
+                    {mode === "video"
+                      ? "Example: a person speaking on stage, a laptop screen, a whiteboard explanation."
+                      : "Example: type a phrase you remember from the spoken transcript."}
+                  </p>
+                </div>
 
-              <div className="stepList">
-                {PROCESS_STEPS.map((step, index) => {
-                  const done = index < currentStepIndex;
-                  const active = index === currentStepIndex;
+                <div className="gemini-composer query-composer">
+                  <div className="composer-input-row">
+                    <div className={cx("mode-chip", mode)}>
+                      <span className="custom-icon-slot" aria-hidden="true">
+                        {mode === "video" ? "▣" : "◖"}
+                      </span>
+                      <span>{selectedMode.label}</span>
+                    </div>
 
-                  return (
-                    <div
-                      key={step.key}
-                      className={cx("stepItem", done && "done", active && "active")}
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={selectedMode.placeholder}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") searchMomentum();
+                      }}
+                      disabled={isSearching}
+                    />
+
+                    <button
+                      className="send-button"
+                      onClick={searchMomentum}
+                      disabled={isSearching}
+                      aria-label="Search"
                     >
-                      <div className="stepDot">
-                        {done ? "✓" : active ? <span /> : ""}
-                      </div>
-
-                      <div>
-                        <strong>{step.label}</strong>
-                        <small>{step.hint}</small>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="thinkingCard">
-              <div className="thinkingHeader">
-                <span className="sectionLabel">Live worker messages</span>
-                <div className="thinkingDots">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-
-              <div className="logList">
-                {activityLog.length === 0 ? (
-                  <div className="emptyLog">
-                    Waiting for the first worker update...
+                      {isSearching ? <span className="button-spinner" /> : "➜"}
+                    </button>
                   </div>
-                ) : (
-                  activityLog.map((item) => (
-                    <div key={item.id} className="logItem">
-                      <div className="logIcon" />
-                      <div>
-                        <strong>{item.text}</strong>
-                        <span>
-                          {item.time} · {item.progress}%
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                </div>
+              </section>
+            )}
+
+            {(isSearching || results.length > 0) && (
+              <section className="results-panel">
+                {isSearching && (
+                  <div className="search-thinking">
+                    <span>Searching the {mode === "video" ? "visual index" : "transcript"}</span>
+                    <span className="typing-dots" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </div>
                 )}
-              </div>
-            </div>
+
+                {!isSearching && results.length > 0 && (
+                  <div className="result-list">
+                    {results.map((item, index) => (
+                      <article key={`${item.timestamp}-${index}`} className="result-card">
+                        <div className="result-time-column">
+                          <span className="result-index">{String(index + 1).padStart(2, "0")}</span>
+                          <a
+                            href={item.youtube_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="timestamp-link"
+                          >
+                            {item.timestamp_label || `${Math.round(item.timestamp || 0)}s`}
+                          </a>
+                        </div>
+
+                        <div className="result-body">
+                          <p>{createResultLabel(mode, item, index)}</p>
+
+                          {mode === "video" && (
+                            <div className="result-meta">
+                              <span>{formatScore(item.score) || "Visual similarity match"}</span>
+                              {item.scene_start !== undefined && item.scene_end !== undefined && (
+                                <span>
+                                  Scene range {Math.round(item.scene_start)}s - {Math.round(item.scene_end)}s
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          <a href={item.youtube_url} target="_blank" rel="noreferrer" className="watch-link">
+                            Open YouTube from this timestamp
+                          </a>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
           </section>
         )}
-
-        <section className={cx("searchCard", !isReady && "locked")}>
-          <div className="searchIntro">
-            <div>
-              <span className="sectionLabel">Dialogue search</span>
-              <h3>What dialogue do you remember?</h3>
-              <p>
-                Search exact phrases from the transcript. Results return the
-                matching dialogue with a YouTube timestamp link.
-              </p>
-            </div>
-
-            {!isReady && (
-              <div className="lockPill">
-                {isFailed ? "Processing failed" : "Available after processing"}
-              </div>
-            )}
-          </div>
-
-          <div className="searchBox">
-            <textarea
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder='Example: "I am going to explain the architecture"'
-              disabled={!isReady || isSearching}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  searchDialogue();
-                }
-              }}
-            />
-
-            <button
-              className="primaryBtn searchBtn"
-              onClick={searchDialogue}
-              disabled={!isReady || isSearching}
-            >
-              {isSearching ? (
-                <>
-                  <span className="miniSpinner" />
-                  Searching
-                </>
-              ) : (
-                "Search dialogue"
-              )}
-            </button>
-          </div>
-        </section>
-
-        <section className="resultsSection">
-          <div className="resultsHeader">
-            <div>
-              <span className="sectionLabel">Results</span>
-              <h3>
-                {results.length > 0
-                  ? `${results.length} timestamp match${results.length > 1 ? "es" : ""}`
-                  : "No results yet"}
-              </h3>
-            </div>
-          </div>
-
-          {isSearching && (
-            <div className="skeletonList">
-              <div />
-              <div />
-              <div />
-            </div>
-          )}
-
-          {!isSearching && results.length === 0 && (
-            <div className="emptyState">
-              <div className="emptyOrb" />
-              <h4>Search results will appear here</h4>
-              <p>
-                Once processing is ready, type a phrase and Momentum will return
-                the exact timestamp and detected dialogue.
-              </p>
-            </div>
-          )}
-
-          {!isSearching && results.length > 0 && (
-            <div className="resultGrid">
-              {results.map((item, index) => (
-                <article key={`${item.timestamp}-${index}`} className="resultCard">
-                  <div className="resultNumber">
-                    {(index + 1).toString().padStart(2, "0")}
-                  </div>
-
-                  <div className="resultMain">
-                    <div className="timestampRow">
-                      <a
-                        href={item.youtube_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="timestampBtn"
-                      >
-                        ▶ {item.timestamp_label || `${item.timestamp}s`}
-                      </a>
-
-                      <span className="rawTime">{item.timestamp}s</span>
-                    </div>
-
-                    <p className="dialogueText">“{item.text}”</p>
-
-                    <a
-                      href={item.youtube_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="watchLink"
-                    >
-                      Watch from this moment →
-                    </a>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
       </main>
+
+      <footer className="demo-note">
+        Momentum can make mistakes. Demo mode currently processes on CPU, so longer videos may take more time than production GPU processing.
+      </footer>
     </div>
   );
 }
