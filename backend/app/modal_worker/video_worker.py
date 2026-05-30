@@ -654,7 +654,7 @@ def start_video_processing(payload: StartVideoRequest):
         job_id=payload.job_id,
         status="queued",
         progress=5,
-        message="CPU video processing submitted to Modal.",
+        message="Video processing submitted to Modal.",
         error="",
     )
 

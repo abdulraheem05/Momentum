@@ -161,6 +161,7 @@ export default function App() {
   const [processingDuration, setProcessingDuration] = useState(null);
 
   const pollRef = useRef(null);
+  const modePickerRef = useRef(null);
 
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
@@ -227,6 +228,23 @@ export default function App() {
     const message = job?.message || `Status changed to ${job.status}`;
     setCurrentVerbose(message);
   }, [job?.message, job?.status, processingDuration]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        modePickerRef.current &&
+        !modePickerRef.current.contains(event.target)
+      ) {
+        setModeMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     const target = progress;
@@ -434,7 +452,7 @@ export default function App() {
                 }}
               />
               <label className={cx("mode-dropdown", mode)}>
-                <div className="mode-picker">
+                <div className="mode-picker" ref={modePickerRef}>
                   <button
                     type="button"
                     className="mode-trigger"
