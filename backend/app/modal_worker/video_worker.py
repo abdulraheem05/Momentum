@@ -655,7 +655,7 @@ def start_video_processing(payload: StartVideoRequest):
         job_id=payload.job_id,
         status="queued",
         progress=5,
-        message="CPU video processing submitted to Modal.",
+        message="Video processing submitted to Modal.",
         error="",
     )
 
@@ -669,5 +669,5 @@ def start_video_processing(payload: StartVideoRequest):
         "ok": True,
         "job_id": payload.job_id,
         "modal_call_id": function_call.object_id,
-        "message": "CPU video processing started in background.",
+        "message": "Video processing started in background.",
     }

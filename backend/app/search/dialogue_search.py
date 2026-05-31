@@ -128,7 +128,7 @@ def search_dialogue_in_transcript(
 
         # Tune this threshold.
         # 0.6 means at least around 60% of important query words should match.
-        if score >= 0.6:
+        if score >= 0.5:
             scored_results.append(
                 {
                     "timestamp": int(start),
