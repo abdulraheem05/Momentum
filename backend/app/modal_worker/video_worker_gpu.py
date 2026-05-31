@@ -8,7 +8,7 @@ import modal
 from pydantic import BaseModel
 
 
-app = modal.App("momentum-youtube-video-worker-gpu")
+app = modal.App("momentum-youtube-video-worker")
 
 
 image = (
@@ -30,6 +30,7 @@ image = (
         "yt-dlp[default]",
         "supabase",
         "pydantic",
+        "scenedetect[opencv]<0.8",
         "opencv-python-headless",
         "torch",
         "transformers",
@@ -49,25 +50,9 @@ class StartVideoRequest(BaseModel):
 
 class VisualSearchRequest(BaseModel):
     job_id: str
-    youtube_id: str | None = None
+    youtube_id: str
     query: str
-    top_k: int = 5
-
-
-# ----------------------------
-# Config
-# ----------------------------
-
-FRAME_SAMPLE_INTERVAL_SECONDS = 1.5
-MAX_INDEXED_FRAMES = 500
-
-CLIP_BATCH_SIZE = 32
-PINECONE_BATCH_SIZE = 64
-
-# Important:
-# ViT-B/16 is better than ViT-B/32 and still outputs 512-dim vectors.
-# So your existing 512-dim Pinecone index can still be used.
-CLIP_MODEL_NAME = "openai/clip-vit-base-patch16"
+    top_k: int = 3
 
 
 def now_iso() -> str:
@@ -183,23 +168,26 @@ def download_youtube_video(
     cookies_path = write_youtube_cookies_if_available(workdir)
 
     ydl_opts = {
-        # Use 480p instead of 360p. 360p can lose small objects/details.
-        # CLIP does not need 1080p, but 480p is a safer balance.
+        # Prefer mp4 video with audio if available.
+        # Fallback to any best format.
         "format": (
-            "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
-            "best[height<=480][ext=mp4]/"
+            "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/"
+            "best[height<=360][ext=mp4]/"
             "best[height<=360]/"
             "best"
         ),
         "merge_output_format": "mp4",
+
         "outtmpl": output_template,
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
+
         "retries": 5,
         "fragment_retries": 5,
         "extractor_retries": 5,
         "socket_timeout": 30,
+
         "force_ipv4": True,
         "js_runtimes": {
             "deno": {},
@@ -217,6 +205,7 @@ def download_youtube_video(
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(normalized_url, download=True)
         video_title = info.get("title", "Untitled YouTube Video")
+
         downloaded_path = ydl.prepare_filename(info)
 
     possible_files = [
@@ -241,68 +230,51 @@ def download_youtube_video(
     )
 
 
-def get_video_duration_seconds(video_path: str) -> float:
-    import cv2
+def detect_scenes(video_path: str) -> List[Dict[str, float]]:
+    from scenedetect import detect, ContentDetector
 
-    cap = cv2.VideoCapture(video_path)
+    raw_scenes = detect(
+        video_path,
+        ContentDetector(threshold=30.0),
+        start_in_scene=True,
+    )
 
-    if not cap.isOpened():
-        raise RuntimeError("Could not open video with OpenCV.")
+    scenes: List[Dict[str, float]] = []
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    for index, (start, end) in enumerate(raw_scenes):
+        start_seconds = start.get_seconds()
+        end_seconds = end.get_seconds()
 
-    cap.release()
+        duration = end_seconds - start_seconds
 
-    if not fps or fps <= 0:
-        fps = 30
+        if duration <= 1.0:
+            continue
 
-    if not frame_count or frame_count <= 0:
-        return 0.0
+        middle_seconds = (start_seconds + end_seconds) / 2
 
-    return float(frame_count / fps)
+        scenes.append({
+            "scene_index": index,
+            "start_time": float(start_seconds),
+            "end_time": float(end_seconds),
+            "timestamp": float(middle_seconds),
+        })
 
+    if not scenes:
+        scenes.append({
+            "scene_index": 0,
+            "start_time": 0.0,
+            "end_time": 0.0,
+            "timestamp": 0.0,
+        })
 
-def build_dense_timestamps(
-    video_path: str,
-    interval_seconds: float = FRAME_SAMPLE_INTERVAL_SECONDS,
-    max_frames: int = MAX_INDEXED_FRAMES,
-) -> List[float]:
-    duration = get_video_duration_seconds(video_path)
-
-    if duration <= 0:
-        return [0.0]
-
-    timestamps = []
-    current = 0.0
-
-    # Avoid exact first and final frames because they can be black/title/transition frames.
-    start_offset = min(0.5, duration * 0.05)
-    current = start_offset
-
-    while current < duration - 0.3:
-        timestamps.append(round(current, 3))
-        current += interval_seconds
-
-    if not timestamps:
-        timestamps = [duration * 0.5]
-
-    # If the video is long, keep a fixed budget but spread frames across the full video.
-    if len(timestamps) > max_frames:
-        import numpy as np
-
-        selected_indexes = np.linspace(0, len(timestamps) - 1, max_frames).astype(int)
-        timestamps = [timestamps[i] for i in selected_indexes]
-
-    print(f"[frames] duration={duration:.2f}s, timestamps={len(timestamps)}")
-
-    return timestamps
+    return scenes
 
 
-def extract_frames_batch_from_video(
-    video_path: str,
-    timestamps: List[float],
-) -> List[Any]:
+def extract_frame_image_at_timestamp(video_path: str, timestamp: float):
+    """
+    Extracts one frame using OpenCV and returns a PIL RGB image.
+    This avoids starting a new ffmpeg process for every scene.
+    """
     import cv2
     from PIL import Image
 
@@ -316,25 +288,20 @@ def extract_frames_batch_from_video(
     if not fps or fps <= 0:
         fps = 30
 
-    images = []
+    frame_number = int(timestamp * fps)
 
-    for timestamp in timestamps:
-        frame_number = int(timestamp * fps)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
 
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-
-        success, frame = cap.read()
-
-        if not success or frame is None:
-            print(f"[frames] Failed to read frame at {timestamp}s")
-            continue
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        images.append(Image.fromarray(frame_rgb))
+    success, frame = cap.read()
 
     cap.release()
 
-    return images
+    if not success or frame is None:
+        raise RuntimeError(f"Could not extract frame at {timestamp}s")
+
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    return Image.fromarray(frame_rgb)
 
 
 _clip_model = None
@@ -351,13 +318,14 @@ def get_clip_model_and_processor():
     import torch
     from transformers import CLIPModel, CLIPProcessor
 
+    model_name = "openai/clip-vit-base-patch32"
+
     _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print(f"[CLIP] Model: {CLIP_MODEL_NAME}")
-    print(f"[CLIP] Device: {_clip_device}")
+    print(f"[CLIP] Using device: {_clip_device}")
 
-    _clip_model = CLIPModel.from_pretrained(CLIP_MODEL_NAME)
-    _clip_processor = CLIPProcessor.from_pretrained(CLIP_MODEL_NAME)
+    _clip_model = CLIPModel.from_pretrained(model_name)
+    _clip_processor = CLIPProcessor.from_pretrained(model_name)
 
     _clip_model.to(_clip_device)
     _clip_model.eval()
@@ -368,7 +336,10 @@ def get_clip_model_and_processor():
 def normalize_vector(values):
     import numpy as np
 
-    array = np.array(values, dtype="float32").reshape(-1)
+    array = np.array(values, dtype="float32")
+
+    # Force it to be one-dimensional
+    array = array.reshape(-1)
 
     if array.shape[0] != 512:
         raise ValueError(
@@ -383,19 +354,39 @@ def normalize_vector(values):
     return (array / norm).tolist()
 
 
-def average_vectors(vectors: List[List[float]]) -> List[float]:
-    import numpy as np
+def embed_image(frame_path: str) -> List[float]:
+    import torch
+    from PIL import Image
 
-    if not vectors:
-        raise ValueError("Cannot average empty vector list.")
+    model, processor, device = get_clip_model_and_processor()
 
-    matrix = np.array(vectors, dtype="float32")
-    avg = matrix.mean(axis=0)
+    image = Image.open(frame_path).convert("RGB")
 
-    return normalize_vector(avg)
+    inputs = processor(
+        images=image,
+        return_tensors="pt",
+    )
 
+    pixel_values = inputs.pixel_values.to(device)
+
+    with torch.no_grad():
+        vision_outputs = model.vision_model(pixel_values=pixel_values)
+
+        pooled_output = vision_outputs.pooler_output
+
+        image_features = model.visual_projection(pooled_output)
+
+    print(f"[CLIP] image_features shape: {tuple(image_features.shape)}")
+
+    vector = image_features.squeeze(0).detach().cpu().numpy()
+
+    return normalize_vector(vector)
 
 def embed_images_batch(images) -> List[List[float]]:
+    """
+    Embeds many PIL images at once.
+    This is where GPU becomes useful.
+    """
     import torch
 
     model, processor, device = get_clip_model_and_processor()
@@ -409,27 +400,15 @@ def embed_images_batch(images) -> List[List[float]]:
     pixel_values = inputs.pixel_values.to(device)
 
     with torch.no_grad():
-        image_features = model.get_image_features(pixel_values=pixel_values)
+        vision_outputs = model.vision_model(pixel_values=pixel_values)
+        pooled_output = vision_outputs.pooler_output
+        image_features = model.visual_projection(pooled_output)
+
+    print(f"[CLIP] batch image_features shape: {tuple(image_features.shape)}")
 
     vectors = image_features.detach().cpu().numpy()
 
     return [normalize_vector(vector) for vector in vectors]
-
-
-def build_query_variants(query: str) -> List[str]:
-    clean_query = query.strip()
-
-    if not clean_query:
-        return []
-
-    # CLIP often works better with image-style prompts.
-    return [
-        clean_query,
-        f"a photo of {clean_query}",
-        f"a video frame showing {clean_query}",
-        f"a scene with {clean_query}",
-        f"an image containing {clean_query}",
-    ]
 
 
 def embed_text(query: str) -> List[float]:
@@ -437,10 +416,8 @@ def embed_text(query: str) -> List[float]:
 
     model, processor, device = get_clip_model_and_processor()
 
-    query_variants = build_query_variants(query)
-
     inputs = processor(
-        text=query_variants,
+        text=[query],
         return_tensors="pt",
         padding=True,
         truncation=True,
@@ -450,15 +427,20 @@ def embed_text(query: str) -> List[float]:
     attention_mask = inputs.attention_mask.to(device)
 
     with torch.no_grad():
-        text_features = model.get_text_features(
+        text_outputs = model.text_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
 
-    vectors = text_features.detach().cpu().numpy()
-    normalized_vectors = [normalize_vector(vector) for vector in vectors]
+        pooled_output = text_outputs.pooler_output
 
-    return average_vectors(normalized_vectors)
+        text_features = model.text_projection(pooled_output)
+
+    print(f"[CLIP] text_features shape: {tuple(text_features.shape)}")
+
+    vector = text_features.squeeze(0).detach().cpu().numpy()
+
+    return normalize_vector(vector)
 
 
 def get_pinecone_index():
@@ -485,89 +467,93 @@ def build_youtube_timestamp_url(youtube_id: str, seconds: float) -> str:
     return f"https://www.youtube.com/watch?v={youtube_id}&t={int(seconds)}s"
 
 
-def index_video_frames(
+def index_video_scenes(
     job_id: str,
     youtube_id: str,
     video_path: str,
 ) -> int:
     index = get_pinecone_index()
+    namespace = youtube_id
 
-    # Important:
-    # Use job_id as namespace so old runs of the same YouTube video do not pollute results.
-    namespace = job_id
+    scenes = detect_scenes(video_path)
 
-    timestamps = build_dense_timestamps(
-        video_path=video_path,
-        interval_seconds=FRAME_SAMPLE_INTERVAL_SECONDS,
-        max_frames=MAX_INDEXED_FRAMES,
-    )
-
-    if not timestamps:
+    if not scenes:
         return 0
+
+    image_batch = []
+    metadata_batch = []
+
+    clip_batch_size = 16
+    pinecone_batch_size = 16
 
     indexed_count = 0
     pending_vectors = []
 
-    for batch_start in range(0, len(timestamps), CLIP_BATCH_SIZE):
-        batch_timestamps = timestamps[batch_start:batch_start + CLIP_BATCH_SIZE]
+    for scene in scenes:
+        scene_index = scene["scene_index"]
+        timestamp = scene["timestamp"]
 
-        images = extract_frames_batch_from_video(
+        image = extract_frame_image_at_timestamp(
             video_path=video_path,
-            timestamps=batch_timestamps,
+            timestamp=timestamp,
         )
 
-        if not images:
-            continue
+        metadata = {
+            "job_id": job_id,
+            "youtube_id": youtube_id,
+            "scene_index": int(scene_index),
+            "timestamp": float(timestamp),
+            "timestamp_label": format_timestamp(timestamp),
+            "youtube_url": build_youtube_timestamp_url(youtube_id, timestamp),
+            "scene_start": float(scene["start_time"]),
+            "scene_end": float(scene["end_time"]),
+        }
 
-        # If some frames failed, align timestamps to actual images count conservatively.
-        valid_timestamps = batch_timestamps[:len(images)]
+        image_batch.append(image)
+        metadata_batch.append(metadata)
 
-        embeddings = embed_images_batch(images)
+        if len(image_batch) >= clip_batch_size:
+            embeddings = embed_images_batch(image_batch)
 
-        for local_index, (embedding, timestamp) in enumerate(zip(embeddings, valid_timestamps)):
+            for embedding, metadata_item in zip(embeddings, metadata_batch):
+                if len(embedding) != 512:
+                    raise ValueError(f"Invalid embedding length: {len(embedding)}")
+
+                vector_id = f"{job_id}-{metadata_item['scene_index']}"
+                pending_vectors.append((vector_id, embedding, metadata_item))
+
+            image_batch.clear()
+            metadata_batch.clear()
+
+            if len(pending_vectors) >= pinecone_batch_size:
+                index.upsert(
+                    vectors=pending_vectors,
+                    namespace=namespace,
+                )
+
+                indexed_count += len(pending_vectors)
+
+                update_video_job(
+                    job_id=job_id,
+                    visual_indexed_count=indexed_count,
+                )
+
+                print(f"[Pinecone] Upserted {indexed_count} scene vectors")
+
+                pending_vectors.clear()
+
+    # Process remaining images
+    if image_batch:
+        embeddings = embed_images_batch(image_batch)
+
+        for embedding, metadata_item in zip(embeddings, metadata_batch):
             if len(embedding) != 512:
                 raise ValueError(f"Invalid embedding length: {len(embedding)}")
 
-            frame_index = batch_start + local_index
+            vector_id = f"{job_id}-{metadata_item['scene_index']}"
+            pending_vectors.append((vector_id, embedding, metadata_item))
 
-            metadata = {
-                "job_id": job_id,
-                "youtube_id": youtube_id,
-                "frame_index": int(frame_index),
-                "timestamp": float(timestamp),
-                "timestamp_label": format_timestamp(timestamp),
-                "youtube_url": build_youtube_timestamp_url(youtube_id, timestamp),
-
-                # Kept for frontend compatibility with your existing result code.
-                "scene_index": int(frame_index),
-                "scene_start": max(0.0, float(timestamp) - FRAME_SAMPLE_INTERVAL_SECONDS / 2),
-                "scene_end": float(timestamp) + FRAME_SAMPLE_INTERVAL_SECONDS / 2,
-
-                "indexing_type": "dense_frame_sampling",
-                "sample_interval_seconds": float(FRAME_SAMPLE_INTERVAL_SECONDS),
-            }
-
-            vector_id = f"{job_id}-frame-{frame_index}"
-
-            pending_vectors.append((vector_id, embedding, metadata))
-
-        if len(pending_vectors) >= PINECONE_BATCH_SIZE:
-            index.upsert(
-                vectors=pending_vectors,
-                namespace=namespace,
-            )
-
-            indexed_count += len(pending_vectors)
-
-            update_video_job(
-                job_id=job_id,
-                visual_indexed_count=indexed_count,
-            )
-
-            print(f"[Pinecone] Upserted {indexed_count} frame vectors")
-
-            pending_vectors.clear()
-
+    # Final Pinecone upsert
     if pending_vectors:
         index.upsert(
             vectors=pending_vectors,
@@ -584,38 +570,6 @@ def index_video_frames(
         print(f"[Pinecone] Final upsert complete. Total: {indexed_count}")
 
     return indexed_count
-
-
-def dedupe_matches_by_time(matches: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
-    """
-    Pinecone may return multiple nearby frames from the same visual moment.
-    This keeps the best result from each nearby time window.
-    """
-    results = []
-    used_time_buckets = set()
-
-    for match in matches:
-        metadata = match.get("metadata", {})
-        timestamp = metadata.get("timestamp")
-
-        if timestamp is None:
-            continue
-
-        timestamp = float(timestamp)
-
-        # 5-second bucket. This avoids showing 00:10, 00:11, 00:13 as separate results.
-        bucket = int(timestamp // 5)
-
-        if bucket in used_time_buckets:
-            continue
-
-        used_time_buckets.add(bucket)
-        results.append(match)
-
-        if len(results) >= top_k:
-            break
-
-    return results
 
 
 @app.function(
@@ -637,14 +591,14 @@ def process_video_background(
             job_id=job_id,
             status="processing",
             progress=10,
-            message="Modal started video processing.",
+            message=f"Modal started processing",
             error="",
         )
 
         update_video_job(
             job_id=job_id,
             visual_status="downloading",
-            pinecone_namespace=job_id,
+            pinecone_namespace=youtube_id,
         )
 
         with tempfile.TemporaryDirectory() as workdir:
@@ -662,29 +616,27 @@ def process_video_background(
             update_parent_job(
                 job_id=job_id,
                 progress=45,
-                message="Video downloaded. Sampling frames.",
+                message="Video downloaded. Detecting scenes.",
                 video_title=video_title,
             )
 
             update_video_job(
                 job_id=job_id,
-                visual_status="sampling_frames",
-                pinecone_namespace=job_id,
+                visual_status="detecting_scenes",
             )
 
             update_parent_job(
                 job_id=job_id,
                 progress=60,
-                message="Creating CLIP frame embeddings.",
+                message=f"Creating CLIP embeddings and indexing scenes.",
             )
 
             update_video_job(
                 job_id=job_id,
                 visual_status="embedding",
-                pinecone_namespace=job_id,
             )
 
-            indexed_count = index_video_frames(
+            indexed_count = index_video_scenes(
                 job_id=job_id,
                 youtube_id=youtube_id,
                 video_path=video_path,
@@ -694,14 +646,14 @@ def process_video_background(
                 job_id=job_id,
                 visual_status="ready",
                 visual_indexed_count=indexed_count,
-                pinecone_namespace=job_id,
+                pinecone_namespace=youtube_id,
             )
 
         update_parent_job(
             job_id=job_id,
             status="ready",
             progress=100,
-            message="Video frame index ready.",
+            message="Video scene index ready.",
             error="",
         )
 
@@ -709,7 +661,6 @@ def process_video_background(
             "ok": True,
             "job_id": job_id,
             "indexed_count": indexed_count,
-            "pinecone_namespace": job_id,
         }
 
     except Exception as error:
@@ -760,12 +711,60 @@ def start_video_processing(payload: StartVideoRequest):
     update_video_job(
         job_id=payload.job_id,
         visual_status="queued",
-        pinecone_namespace=payload.job_id,
+        pinecone_namespace=payload.youtube_id,
     )
 
     return {
         "ok": True,
         "job_id": payload.job_id,
         "modal_call_id": function_call.object_id,
-        "message": "GPU video processing started in background.",
+        "message": "Video processing started in background.",
+    }
+
+
+@app.function(
+    image=image,
+    timeout=120,
+    secrets=[
+        modal.Secret.from_name("momentum-youtube-v1-secrets"),
+    ],
+)
+@modal.fastapi_endpoint(method="POST")
+def search_visual_scenes(payload: VisualSearchRequest):
+    query_vector = embed_text(payload.query)
+
+    index = get_pinecone_index()
+
+    namespace = payload.youtube_id
+
+    search_response = index.query(
+        vector=query_vector,
+        top_k=payload.top_k,
+        namespace=namespace,
+        include_metadata=True,
+    )
+
+    matches = search_response.get("matches", [])
+
+    results = []
+
+    for match in matches:
+        metadata = match.get("metadata", {})
+
+        results.append({
+            "score": match.get("score"),
+            "timestamp": metadata.get("timestamp"),
+            "timestamp_label": metadata.get("timestamp_label"),
+            "youtube_url": metadata.get("youtube_url"),
+            "scene_index": metadata.get("scene_index"),
+            "scene_start": metadata.get("scene_start"),
+            "scene_end": metadata.get("scene_end"),
+        })
+
+    return {
+        "job_id": payload.job_id,
+        "youtube_id": payload.youtube_id,
+        "query": payload.query,
+        "count": len(results),
+        "results": results,
     }

@@ -425,12 +425,13 @@ def index_video_scenes(
 
     scenes = detect_scenes(video_path)
 
-    # CPU version: keep this conservative.
-    # Increase later if you want denser indexing.
-    scenes = scenes[:80]
-
     if not scenes:
         return 0
+    
+    if scenes:
+        print(f"[scenes] Total detected scenes: {len(scenes)}")
+        print(f"[scenes] First scene: {scenes[0]}")
+        print(f"[scenes] Last scene: {scenes[-1]}")
 
     image_batch = []
     metadata_batch = []
@@ -654,7 +655,7 @@ def start_video_processing(payload: StartVideoRequest):
         job_id=payload.job_id,
         status="queued",
         progress=5,
-        message="Video processing submitted to Modal.",
+        message="CPU video processing submitted to Modal.",
         error="",
     )
 

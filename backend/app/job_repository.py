@@ -51,7 +51,7 @@ def create_youtube_job(
                 "job_id": job_id,
                 "visual_status": "queued",
                 "visual_indexed_count": 0,
-                "pinecone_namespace": youtube_id,
+                "pinecone_namespace": job_id,
             })
             .execute()
         )
