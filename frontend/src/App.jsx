@@ -586,26 +586,176 @@ export default function App() {
         <section className="intro-panel">
           <div className="brand-center">
             <h1>Momentum</h1>
-            <p>Search any YouTube video by what you see or what you hear.</p>
+            <p>
+              {sourceType === "youtube"
+                ? "Search any YouTube video by what you see or what you hear."
+                : "Upload a local file and search by scenes or dialogue."}
+            </p>
           </div>
 
+          {!hasStarted && (
+            <div className="source-switcher">
+              <button
+                type="button"
+                className={sourceType === "youtube" ? "active" : ""}
+                onClick={() => setSourceType("youtube")}
+              >
+                YouTube Video
+              </button>
+
+              <button
+                type="button"
+                className={sourceType === "upload" ? "active" : ""}
+                onClick={() => setSourceType("upload")}
+              >
+                Local Files
+              </button>
+
+              <span className={cx("source-switcher-thumb", sourceType)} />
+            </div>
+          )}
+
+
           <div className="gemini-composer source-composer">
-            <div className="composer-input-row">
-              <input
-                value={youtubeUrl}
-                onChange={(e) => setYoutubeUrl(e.target.value)}
-                placeholder="Paste a YouTube URL"
-                disabled={isCreatingJob || (!!jobId && !isFailed)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") startProcessing();
-                }}
-              />
-              <label className={cx("mode-dropdown", mode)}>
+
+            {sourceType === "youtube" ? (
+            <>
+              <div className="composer-input-row">
+                <input
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="Paste a YouTube URL"
+                  disabled={isCreatingJob || (!!jobId && !isFailed)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") startProcessing();
+                  }}
+                />
+
+                <label className={cx("mode-dropdown", mode)}>
+                  <div className="mode-picker" ref={modePickerRef}>
+                    <button
+                      type="button"
+                      className="mode-trigger"
+                      onClick={() => setModeMenuOpen((prev) => !prev)}
+                    >
+                      <span className="mode-icon-slot">
+                        {mode === "video" ? (
+                          <img src="/icons/video.svg" alt="" />
+                        ) : (
+                          <img src="/icons/audio.svg" alt="" />
+                        )}
+                      </span>
+
+                      <span className="mode-trigger-label">
+                        {mode === "video" ? "Scene Search" : "Dialogue Search"}
+                      </span>
+                    </button>
+
+                    {modeMenuOpen && (
+                      <div className="mode-menu">
+                        {SEARCH_MODES.map((item) => {
+                          const selected = mode === item.id;
+
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={selected ? "mode-menu-item selected" : "mode-menu-item"}
+                              onClick={() => {
+                                setMode(item.id);
+                                setModeMenuOpen(false);
+                              }}
+                            >
+                              <span className="mode-icon-slot menu-icon">
+                                {item.id === "video" ? (
+                                  <img src="/icons/video.svg" alt="" />
+                                ) : (
+                                  <img src="/icons/audio.svg" alt="" />
+                                )}
+                              </span>
+
+                              <span className="mode-copy">
+                                <strong>{item.label}</strong>
+                                <small>{item.description}</small>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </label>
+
+                <button
+                  className="send-button"
+                  onClick={startProcessing}
+                  disabled={isCreatingJob || (!!jobId && !isFailed)}
+                  aria-label="Start processing"
+                >
+                  {isCreatingJob ? <span className="button-spinner" /> : "➜"}
+                </button>
+              </div>
+
+              {previewYoutubeId && !hasStarted && (
+                <div className="instant-preview">
+                  <img
+                    src={videoMeta?.thumbnail || `https://img.youtube.com/vi/${previewYoutubeId}/mqdefault.jpg`}
+                    alt="YouTube thumbnail preview"
+                  />
+                  <div>
+                    <strong>
+                      {isFetchingMeta ? "Fetching video title..." : videoMeta?.title || "YouTube video detected"}
+                    </strong>
+
+                    <span>
+                      {videoMeta?.author ? `${videoMeta.author} · ` : ""}
+                      {buildWatchUrl(previewYoutubeId)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="upload-composer">
+              <label
+                className={cx(
+                  "upload-dropzone",
+                  (isCreatingJob || isUploadingFile) && "uploading"
+                )}
+              >
+                <input
+                  type="file"
+                  accept="video/*,audio/*"
+                  hidden
+                  disabled={isCreatingJob || (!!jobId && !isFailed)}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) startUploadProcessing(file);
+                  }}
+                />
+
+                <div className="upload-icon-card">
+                  <span>▴</span>
+                </div>
+
+                <strong>
+                  {selectedFile ? selectedFile.name : "Drop your file here, or browse"}
+                </strong>
+
+                <small>
+                  Supports MP4, MOV, WEBM, MP3, WAV
+                </small>
+              </label>
+
+              <div className="upload-mode-row">
+                <span>Search mode</span>
+
                 <div className="mode-picker" ref={modePickerRef}>
                   <button
                     type="button"
                     className="mode-trigger"
                     onClick={() => setModeMenuOpen((prev) => !prev)}
+                    disabled={isCreatingJob || (!!jobId && !isFailed)}
                   >
                     <span className="mode-icon-slot">
                       {mode === "video" ? (
@@ -618,8 +768,6 @@ export default function App() {
                     <span className="mode-trigger-label">
                       {mode === "video" ? "Scene Search" : "Dialogue Search"}
                     </span>
-
-                    
                   </button>
 
                   {modeMenuOpen && (
@@ -655,38 +803,25 @@ export default function App() {
                     </div>
                   )}
                 </div>
-
-              </label>
-
-              <button
-                className="send-button"
-                onClick={startProcessing}
-                disabled={isCreatingJob || (!!jobId && !isFailed)}
-                aria-label="Start processing"
-              >
-                {isCreatingJob ? <span className="button-spinner" /> : "➜"}
-              </button>
-            </div>
-
-
-            {previewYoutubeId && !hasStarted && (
-              <div className="instant-preview">
-                <img
-                  src={videoMeta?.thumbnail || `https://img.youtube.com/vi/${previewYoutubeId}/mqdefault.jpg`}
-                  alt="YouTube thumbnail preview"
-                />
-                <div>
-                  <strong>
-                    {isFetchingMeta ? "Fetching video title..." : videoMeta?.title || "YouTube video detected"}
-                  </strong>
-
-                  <span>
-                    {videoMeta?.author ? `${videoMeta.author} · ` : ""}
-                    {buildWatchUrl(previewYoutubeId)}
-                  </span>
-                </div>
               </div>
-            )}
+
+              {(isUploadingFile || uploadProgress > 0) && !hasStarted && (
+                <div className="upload-progress-wrap">
+                  <div className="upload-progress-top">
+                    <span>{selectedFile?.name || "Uploading file"}</span>
+                    <strong>{uploadProgress}%</strong>
+                  </div>
+
+                  <div className="upload-progress-track">
+                    <div
+                      className="upload-progress-fill"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           </div>
 
           {error && (
@@ -700,10 +835,16 @@ export default function App() {
         {hasStarted && (
           <section className="conversation-panel">
             <article className="source-message">
-              <img
-                src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
-                alt="Processed YouTube video thumbnail"
-              />
+              {sourceType === "youtube" ? (
+                <img
+                  src={`https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`}
+                  alt="Processed YouTube video thumbnail"
+                />
+              ) : (
+                <div className="uploaded-file-visual">
+                  <span>{mode === "video" ? "VIDEO" : "AUDIO"}</span>
+                </div>
+              )}
 
               <div className="source-message-content">
                 <div className="source-topline">
@@ -713,10 +854,22 @@ export default function App() {
                   </span>
                 </div>
 
-                <h2>{videoTitle}</h2>
+                <h2>
+                {sourceType === "upload"
+                  ? job?.original_file_name || selectedFile?.name || "Uploaded file"
+                  : videoTitle}
+              </h2>
+
+              {sourceType === "youtube" ? (
                 <a href={buildWatchUrl(youtubeId)} target="_blank" rel="noreferrer">
                   {submittedUrl || buildWatchUrl(youtubeId)}
                 </a>
+              ) : (
+                <span className="local-file-caption">
+                  {selectedFile?.type || job?.media_content_type || "Local file"}{" "}
+                  {selectedFile?.size ? `· ${formatFileSize(selectedFile.size)}` : ""}
+                </span>
+              )}
               </div>
             </article>
 
@@ -744,7 +897,7 @@ export default function App() {
 
               <div className="thinking-copy">
                 <div className="thinking-line-main">
-                  <span>{getThinkingTitle(job, mode, isCreatingJob)}</span>
+                  <span>{getThinkingTitle(job, mode, isCreatingJob, sourceType)}</span>
                   {!isReady && !isFailed && (
                     <span className="typing-dots" aria-hidden="true">
                       <i />
@@ -825,27 +978,39 @@ export default function App() {
                         result.similarity_percent ||
                         Math.round((result.score || result.similarity || 0) * 100);
 
-                      const youtubeUrl =
+                      const resultUrl =
                         result.youtube_url ||
                         result.url ||
                         result.timestamp_url ||
                         buildYouTubeTimestampUrl(
-                          job?.youtube_url || youtubeUrl,
+                          job?.youtube_url || submittedUrl,
                           result.timestamp || result.start_time || result.start || 0
                         );
+
+                      if (sourceType === "upload") {
+                        return (
+                          <div
+                            key={`${timestamp}-${index}`}
+                            className="result-pill local-result-pill"
+                          >
+                            <span className="result-time">{timestamp}</span>
+                            <span className="result-score">{score}% match</span>
+                          </div>
+                        );
+                      }
 
                       return (
                         <a
                           key={`${timestamp}-${index}`}
                           className="result-pill"
-                          href={youtubeUrl}
+                          href={resultUrl}
                           target="_blank"
                           rel="noreferrer"
                         >
                           <span className="result-time">{timestamp}</span>
                           <span className="result-score">{score}% match</span>
-                        </a> 
-                      ); 
+                        </a>
+                      );
                     })}
                   </div>
                   <div className="new-video-action">
