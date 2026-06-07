@@ -17,6 +17,7 @@ class Settings:
     AZURE_TRANSCRIPTS_CONTAINER: str = os.getenv(
         "AZURE_TRANSCRIPTS_CONTAINER", "transcripts"
     )
+    AZURE_UPLOADS_CONTAINER = os.getenv("AZURE_UPLOADS_CONTAINER", "momentum-uploads")
 
     PINECONE_API_KEY: str = os.getenv("PINECONE_API_KEY", "")
     PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME", "")
