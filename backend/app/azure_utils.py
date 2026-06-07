@@ -36,11 +36,15 @@ def upload_media_file_to_azure(
         blob=blob_name,
     )
 
-    file_bytes = file_obj.read()
+    file_obj.seek(0, 2)
+    file_size = file_obj.tell()
+    file_obj.seek(0)
 
     blob_client.upload_blob(
-        file_bytes,
+        file_obj,
         overwrite=True,
+        length=file_size,
+        max_concurrency=4,
         content_settings=ContentSettings(
             content_type=content_type or "application/octet-stream"
         ),
@@ -50,7 +54,7 @@ def upload_media_file_to_azure(
         "blob_name": blob_name,
         "blob_url": blob_client.url,
         "content_type": content_type or "application/octet-stream",
-        "file_size": len(file_bytes),
+        "file_size": file_size,
     }
 
 

@@ -129,6 +129,12 @@ def search_visual_scenes_backend(
 
     matches = search_response.get("matches", [])
 
+    matches = sorted(
+        matches,
+        key=lambda match: float(match.get("score") or 0),
+        reverse=True,
+    )
+
     results = []
 
     for match in matches:

@@ -231,7 +231,7 @@ export default function App() {
   const progress = clampProgress(job?.progress);
   const isReady = job?.status === "ready";
   const isFailed = job?.status === "failed";
-  const hasStarted = Boolean(jobId || job || isCreatingJob);
+  const hasStarted = Boolean(jobId || job);
   const selectedMode = MODE_OPTIONS[mode];
 
   useEffect(() => {
@@ -482,9 +482,21 @@ export default function App() {
         setUploadProgress(percent);
 
         if (percent < 100) {
-          setCurrentVerbose(`Uploading file... ${percent}%`);
+          setCurrentVerbose("Uploading file to cloud storage...");
         } else {
           setCurrentVerbose("File uploaded. Starting processing...");
+          setJob({
+            id: "upload-pending",
+            source_type: "upload",
+            mode,
+            status: "processing",
+            progress: 8,
+            message: "Saving file to cloud storage...",
+            original_file_name: file.name,
+            media_content_type: file.type,
+          });
+
+          setDisplayProgress(8);
         }
       },
     });
@@ -496,7 +508,7 @@ export default function App() {
       source_type: "upload",
       mode: response.data.mode || mode,
       status: response.data.status || "queued",
-      progress: response.data.progress || 5,
+      progress: response.data.progress || 15,
       message: response.data.message || "File uploaded. Processing started.",
       original_file_name: response.data.file_name,
       media_blob_url: response.data.media_blob_url,
@@ -545,7 +557,12 @@ export default function App() {
       query: cleanQuery,
     });
 
-      setResults(response.data.results || []);
+    const sortedResults = [...(response.data.results || [])].sort(
+      (a, b) => Number(b.score || b.similarity || 0) - Number(a.score || a.similarity || 0)
+    );
+
+    setResults(sortedResults);
+
     } catch (err) {
       setError(
         err?.response?.data?.detail ||
@@ -809,7 +826,9 @@ export default function App() {
                 <div className="upload-progress-wrap">
                   <div className="upload-progress-top">
                     <span>{selectedFile?.name || "Uploading file"}</span>
-                    <strong>{uploadProgress}%</strong>
+                    <strong>
+                      {uploadProgress < 100 ? `${uploadProgress}%` : "Uploaded"}
+                    </strong>
                   </div>
 
                   <div className="upload-progress-track">
