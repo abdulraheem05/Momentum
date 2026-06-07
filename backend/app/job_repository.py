@@ -1,7 +1,84 @@
 from typing import Any, Dict, Optional
-
+import uuid
+from datetime import datetime, timezone
 from app.supabase_client import supabase
 
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def create_upload_job(
+    original_file_name: str,
+    media_blob_name: str,
+    media_blob_url: str,
+    media_content_type: str,
+    media_file_size: int,
+    mode: str,
+) -> Dict[str, Any]:
+    job_id = str(uuid.uuid4())
+
+    parent_data = {
+        "id": job_id,
+        "source_type": "upload",
+        "youtube_url": None,
+        "youtube_id": None,
+        "mode": mode,
+        "status": "queued",
+        "progress": 5,
+        "message": "File uploaded. Preparing processing.",
+        "error": "",
+        "original_file_name": original_file_name,
+        "media_blob_name": media_blob_name,
+        "media_blob_url": media_blob_url,
+        "media_content_type": media_content_type,
+        "media_file_size": media_file_size,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+    parent_response = (
+        supabase
+        .table("youtube_jobs")
+        .insert(parent_data)
+        .execute()
+    )
+
+    if mode == "audio":
+        (
+            supabase
+            .table("youtube_audio_jobs")
+            .insert({
+                "job_id": job_id,
+                "audio_status": "queued",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            })
+            .execute()
+        )
+
+    elif mode == "video":
+        (
+            supabase
+            .table("youtube_video_jobs")
+            .insert({
+                "job_id": job_id,
+                "visual_status": "queued",
+                "visual_indexed_count": 0,
+                "pinecone_namespace": job_id,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            })
+            .execute()
+        )
+
+    else:
+        raise ValueError("mode must be either 'audio' or 'video'")
+
+    return parent_response.data[0]
+
+
+#------------------------------------------#
 
 def create_youtube_job(
     youtube_url: str,

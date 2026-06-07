@@ -10,6 +10,7 @@ from app.config import settings
 
 _clip_model = None
 _clip_processor = None
+_pinecone_index = None
 
 
 def get_clip_model_and_processor():
@@ -33,11 +34,6 @@ def get_clip_model_and_processor():
 
 
 def warmup_clip_model() -> None:
-    """
-    Loads CLIP before the user searches.
-    Also runs one tiny dummy embedding to fully warm the model.
-    """
-
     model, processor = get_clip_model_and_processor()
 
     inputs = processor(
@@ -100,12 +96,20 @@ def embed_text_query(query: str) -> List[float]:
 
 
 def get_pinecone_index():
+    global _pinecone_index
+
+    if _pinecone_index is not None:
+        return _pinecone_index
+
     pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-    return pc.Index(settings.PINECONE_INDEX_NAME)
+    _pinecone_index = pc.Index(settings.PINECONE_INDEX_NAME)
+
+    return _pinecone_index
 
 
 def search_visual_scenes_backend(
-    youtube_id: str,
+    job_id: str,
+    namespace: str,
     query: str,
     top_k: int = 3,
 ) -> Dict[str, Any]:
@@ -116,8 +120,11 @@ def search_visual_scenes_backend(
     search_response = index.query(
         vector=query_vector,
         top_k=top_k,
-        namespace=youtube_id,
+        namespace=namespace,
         include_metadata=True,
+        filter={
+            "job_id": {"$eq": job_id}
+        },
     )
 
     matches = search_response.get("matches", [])
@@ -132,13 +139,14 @@ def search_visual_scenes_backend(
             "timestamp": metadata.get("timestamp"),
             "timestamp_label": metadata.get("timestamp_label"),
             "youtube_url": metadata.get("youtube_url"),
+            "media_blob_url": metadata.get("media_blob_url"),
+            "source_type": metadata.get("source_type", "youtube"),
             "scene_index": metadata.get("scene_index"),
             "scene_start": metadata.get("scene_start"),
             "scene_end": metadata.get("scene_end"),
         })
 
     return {
-        "youtube_id": youtube_id,
         "query": query,
         "count": len(results),
         "results": results,

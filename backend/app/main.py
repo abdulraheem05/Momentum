@@ -1,19 +1,21 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
+import uuid
+from fastapi import UploadFile, File, Form
 from fastapi import BackgroundTasks
 
 from app.youtube_utils import extract_youtube_id
-from app.modal_client import trigger_modal_processing
+from app.modal_client import trigger_modal_processing, trigger_modal_upload_processing
 from app.job_repository import (
     create_youtube_job as create_job_record,
     get_youtube_job_by_id,
     get_youtube_job_with_details,
-    mark_job_worker_trigger_failed,
+    mark_job_worker_trigger_failed, 
+    create_upload_job
 )
 
-from app.azure_utils import load_transcript_json
+from app.azure_utils import load_transcript_json, upload_media_file_to_azure
 from app.search.dialogue_search import search_dialogue_in_transcript
 from app.search.visual_search import warmup_clip_model, search_visual_scenes_backend
 
@@ -49,6 +51,104 @@ def health_check():
         "status": "ok",
         "message": "Momentum YouTube V1 backend is running",
     }
+
+@app.post("/upload/jobs")
+async def create_local_upload_job(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    mode: str = Form("video"),
+):
+    try:
+        mode = mode.lower().strip()
+
+        if mode not in {"video", "audio"}:
+            raise HTTPException(
+                status_code=400,
+                detail="mode must be either 'video' or 'audio'.",
+            )
+
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="No file selected.",
+            )
+
+        job_id_for_blob = str(uuid.uuid4())
+
+        upload_info = upload_media_file_to_azure(
+            file_obj=file.file,
+            filename=file.filename,
+            content_type=file.content_type,
+            job_id=job_id_for_blob,
+        )
+
+        job = create_upload_job(
+            original_file_name=file.filename,
+            media_blob_name=upload_info["blob_name"],
+            media_blob_url=upload_info["blob_url"],
+            media_content_type=upload_info["content_type"],
+            media_file_size=upload_info["file_size"],
+            mode=mode,
+        )
+
+        try:
+            trigger_modal_upload_processing(
+                job_id=job["id"],
+                media_blob_name=upload_info["blob_name"],
+                media_blob_url=upload_info["blob_url"],
+                original_file_name=file.filename,
+                mode=mode,
+            )
+        except Exception as modal_error:
+            mark_job_worker_trigger_failed(
+                job_id=job["id"],
+                error_message=str(modal_error),
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Upload job created but failed to trigger worker: {modal_error}",
+            )
+
+        if mode == "video":
+            background_tasks.add_task(warmup_clip_model)
+
+        return {
+            "job_id": job["id"],
+            "source_type": "upload",
+            "mode": mode,
+            "status": "queued",
+            "progress": 5,
+            "message": "File uploaded. Processing started.",
+            "file_name": file.filename,
+            "media_blob_url": upload_info["blob_url"],
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) 
+    
+
+@app.get("/upload/jobs/{job_id}")
+def get_upload_job(job_id: str):
+    job = get_youtube_job_with_details(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    return job
+
+
+@app.post("/upload/search-visual")
+def search_upload_visual(payload: SearchVisualRequest):
+    return search_visual(payload)
+
+
+@app.post("/upload/search-dialogue")
+def search_upload_dialogue(payload: SearchDialogueRequest):
+    return search_dialogue(payload)
 
 
 @app.post("/youtube/jobs")
@@ -197,6 +297,12 @@ def search_visual(payload: SearchVisualRequest):
                 detail="This job is not a video search job.",
             )
 
+        if job["status"] != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job is not ready yet. Current status: {job['status']}",
+            )
+
         video_details = job.get("video_details")
 
         if not video_details:
@@ -211,8 +317,14 @@ def search_visual(payload: SearchVisualRequest):
                 detail=f"Video index is not ready yet. Current status: {video_details['visual_status']}",
             )
 
+        pinecone_namespace = (
+            video_details.get("pinecone_namespace")
+            or payload.job_id
+        )
+
         result = search_visual_scenes_backend(
-            youtube_id=job["youtube_id"],
+            job_id=payload.job_id,
+            namespace=pinecone_namespace,
             query=payload.query,
             top_k=3,
         )
