@@ -216,6 +216,7 @@ export default function App() {
 
   const pollRef = useRef(null);
   const modePickerRef = useRef(null);
+  const uploadModeRowRef = useRef(null);
 
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
@@ -301,25 +302,37 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const target = progress;
+      const target = progress;
 
-    const interval = setInterval(() => {
-      setDisplayProgress((current) => {
-        if (current === target) {
-          clearInterval(interval);
-          return current;
-        }
+      const interval = setInterval(() => {
+        setDisplayProgress((current) => {
+          if (current === target) {
+            clearInterval(interval);
+            return current;
+          }
 
-        if (current < target) {
-          return Math.min(current + 1, target);
-        }
+          if (current < target) {
+            return Math.min(current + 1, target);
+          }
 
-        return Math.max(current - 1, target);
+          return Math.max(current - 1, target);
+        });
+      }, 18);
+
+      return () => clearInterval(interval);
+    }, [progress]);
+
+    useEffect(() => {
+    if (sourceType !== "upload") return;
+    if (!modeMenuOpen) return;
+
+    setTimeout(() => {
+      uploadModeRowRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
       });
-    }, 18);
-
-    return () => clearInterval(interval);
-  }, [progress]);
+    }, 80);
+  }, [modeMenuOpen, sourceType]);
 
 
   const stopPolling = () => {
@@ -598,7 +611,13 @@ export default function App() {
   };
 
   return (
-    <div className={cx("momentum-app", hasStarted && "conversation-mode")}>
+    <div
+      className={cx(
+        "momentum-app",
+        hasStarted && "conversation-mode",
+        modeMenuOpen && !hasStarted && "mode-menu-open"
+      )}
+    >
       <main className="momentum-shell">
         <section className="intro-panel">
           <div className="brand-center">
@@ -733,7 +752,7 @@ export default function App() {
               )}
             </>
           ) : (
-            <div className="upload-composer">
+            <div className={cx("upload-composer", modeMenuOpen && "mode-open")}>
               <label
                 className={cx(
                   "upload-dropzone",
@@ -764,8 +783,7 @@ export default function App() {
                 </small>
               </label>
 
-              <div className="upload-mode-row">
-                <span>Search mode</span>
+              <div className="upload-mode-row" ref={uploadModeRowRef}>
 
                 <div className="mode-picker" ref={modePickerRef}>
                   <button
