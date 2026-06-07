@@ -6,7 +6,7 @@ from app.youtube_utils import build_youtube_timestamp_url
 
 STOP_WORDS = {
     "the", "a", "an", "and", "or", "but",
-    "is", "are", "was", "were",
+    "is", "are", "am", "was", "were",
     "to", "of", "in", "on", "at", "for", "with",
     "this", "that", "these", "those",
     "i", "you", "he", "she", "it", "we", "they",
@@ -27,11 +27,19 @@ def format_timestamp(seconds: float) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """
-    Lowercase text and remove punctuation.
-    """
-
     text = text.lower()
+    text = text.replace("’", "'").replace("`", "'")
+
+    text = re.sub(r"\bi'm\b", "i am", text)
+    text = re.sub(r"\bim\b", "i am", text)
+
+    text = re.sub(r"\byou're\b", "you are", text)
+    text = re.sub(r"\bwe're\b", "we are", text)
+    text = re.sub(r"\bthey're\b", "they are", text)
+    text = re.sub(r"\bhe's\b", "he is", text)
+    text = re.sub(r"\bshe's\b", "she is", text)
+    text = re.sub(r"\bit's\b", "it is", text)
+
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
 
@@ -39,13 +47,7 @@ def normalize_text(text: str) -> str:
 
 
 def tokenize(text: str) -> List[str]:
-    """
-    Converts text into searchable words.
-    Removes very common words.
-    """
-
     normalized = normalize_text(text)
-
     words = normalized.split()
 
     important_words = [
@@ -57,19 +59,12 @@ def tokenize(text: str) -> List[str]:
 
 
 def calculate_match_score(query: str, segment_text: str) -> float:
-    """
-    Returns a flexible score between 0 and 1.
-
-    Higher score = better match.
-    """
-
     normalized_query = normalize_text(query)
     normalized_segment = normalize_text(segment_text)
 
     if not normalized_query:
         return 0.0
 
-    # 1. Best case: exact phrase appears
     if normalized_query in normalized_segment:
         return 1.0
 
@@ -86,11 +81,9 @@ def calculate_match_score(query: str, segment_text: str) -> float:
 
     word_match_ratio = len(matched_words) / len(query_words)
 
-    # 2. If all important words are present, strong match
     if word_match_ratio == 1.0:
         return 0.93
 
-    # 3. Partial match
     return word_match_ratio
 
 
@@ -99,23 +92,15 @@ def search_dialogue_in_transcript(
     query: str,
     max_results: int = 3,
 ) -> List[Dict[str, Any]]:
-    """
-    Flexible dialogue search.
-
-    It supports:
-    - exact phrase matching
-    - missing middle words
-    - partial word matching
-
-    No semantic embeddings used.
-    """
-
     clean_query = query.strip()
 
     if not clean_query:
         return []
 
-    youtube_id = transcript_data["youtube_id"]
+    source_type = transcript_data.get("source_type", "youtube")
+    youtube_id = transcript_data.get("youtube_id")
+    media_blob_url = transcript_data.get("media_blob_url")
+
     segments = transcript_data.get("segments", [])
 
     scored_results = []
@@ -126,21 +111,24 @@ def search_dialogue_in_transcript(
 
         score = calculate_match_score(clean_query, text)
 
-        # Tune this threshold.
-        # 0.6 means at least around 60% of important query words should match.
         if score >= 0.5:
-            scored_results.append(
-                {
-                    "timestamp": int(start),
-                    "timestamp_label": format_timestamp(start),
-                    "text": text,
-                    "youtube_url": build_youtube_timestamp_url(
-                        youtube_id=youtube_id,
-                        seconds=start,
-                    ),
-                    "score": round(score, 3),
-                }
-            )
+            result = {
+                "timestamp": int(start),
+                "timestamp_label": format_timestamp(start),
+                "text": text,
+                "score": round(score, 3),
+                "source_type": source_type,
+            }
+
+            if source_type == "youtube" and youtube_id:
+                result["youtube_url"] = build_youtube_timestamp_url(
+                    youtube_id=youtube_id,
+                    seconds=start,
+                )
+            else:
+                result["media_blob_url"] = media_blob_url
+
+            scored_results.append(result)
 
     scored_results.sort(
         key=lambda item: item["score"],

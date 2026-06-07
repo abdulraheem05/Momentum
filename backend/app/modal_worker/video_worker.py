@@ -37,14 +37,22 @@ image = (
         "Pillow",
         "pinecone",
         "numpy",
+        "azure-storage-blob",
     )
 )
 
 
 class StartVideoRequest(BaseModel):
     job_id: str
-    youtube_url: str
-    youtube_id: str
+    source_type: str = "youtube"
+
+    youtube_url: str | None = None
+    youtube_id: str | None = None
+
+    media_blob_name: str | None = None
+    media_blob_url: str | None = None
+    original_file_name: str | None = None
+
     mode: str = "video"
 
 
@@ -223,6 +231,31 @@ def download_youtube_video(
     raise FileNotFoundError(
         f"Video download failed. Files found: {os.listdir(workdir)}"
     )
+
+def download_uploaded_media(
+    media_blob_name: str,
+    workdir: str,
+) -> str:
+    from azure.storage.blob import BlobServiceClient
+
+    connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+    container_name = os.environ.get("AZURE_UPLOADS_CONTAINER", "momentum-uploads")
+
+    extension = os.path.splitext(media_blob_name)[1] or ".mp4"
+    output_path = os.path.join(workdir, f"uploaded-media{extension}")
+
+    blob_service = BlobServiceClient.from_connection_string(connection_string)
+
+    blob_client = blob_service.get_blob_client(
+        container=container_name,
+        blob=media_blob_name,
+    )
+
+    with open(output_path, "wb") as file:
+        stream = blob_client.download_blob()
+        file.write(stream.readall())
+
+    return output_path
 
 
 def detect_scenes(video_path: str) -> List[Dict[str, float]]:
@@ -417,11 +450,14 @@ def build_youtube_timestamp_url(youtube_id: str, seconds: float) -> str:
 
 def index_video_scenes(
     job_id: str,
-    youtube_id: str,
+    youtube_id: str | None,
     video_path: str,
+    namespace: str,
+    source_type: str = "youtube",
+    media_blob_url: str | None = None,
+    original_file_name: str | None = None,
 ) -> int:
     index = get_pinecone_index()
-    namespace = youtube_id
 
     scenes = detect_scenes(video_path)
 
@@ -454,14 +490,20 @@ def index_video_scenes(
 
         metadata = {
             "job_id": job_id,
-            "youtube_id": youtube_id,
+            "source_type": source_type,
             "scene_index": int(scene_index),
             "timestamp": float(timestamp),
             "timestamp_label": format_timestamp(timestamp),
-            "youtube_url": build_youtube_timestamp_url(youtube_id, timestamp),
             "scene_start": float(scene["start_time"]),
             "scene_end": float(scene["end_time"]),
         }
+
+        if source_type == "youtube":
+            metadata["youtube_id"] = youtube_id
+            metadata["youtube_url"] = build_youtube_timestamp_url(youtube_id, timestamp)
+        else:
+            metadata["media_blob_url"] = media_blob_url
+            metadata["original_file_name"] = original_file_name
 
         image_batch.append(image)
         metadata_batch.append(metadata)
@@ -534,9 +576,14 @@ def index_video_scenes(
 )
 def process_video_background(
     job_id: str,
-    youtube_url: str,
-    youtube_id: str,
+    source_type: str = "youtube",
+    youtube_url: str | None = None,
+    youtube_id: str | None = None,
+    media_blob_name: str | None = None,
+    media_blob_url: str | None = None,
+    original_file_name: str | None = None,
 ) -> Dict[str, Any]:
+    
     try:
         update_parent_job(
             job_id=job_id,
@@ -549,20 +596,41 @@ def process_video_background(
         update_video_job(
             job_id=job_id,
             visual_status="downloading",
-            pinecone_namespace=youtube_id,
+            pinecone_namespace=job_id,
         )
 
         with tempfile.TemporaryDirectory() as workdir:
-            update_parent_job(
-                job_id=job_id,
-                progress=25,
-                message="Downloading video from YouTube.",
-            )
+            if source_type == "upload":
+                if not media_blob_name:
+                    raise ValueError("media_blob_name is required for upload source.")
 
-            video_path, video_title = download_youtube_video(
-                youtube_id=youtube_id,
-                workdir=workdir,
-            )
+                update_parent_job(
+                    job_id=job_id,
+                    progress=25,
+                    message="Downloading uploaded file.",
+                )
+
+                video_path = download_uploaded_media(
+                    media_blob_name=media_blob_name,
+                    workdir=workdir,
+                )
+
+                video_title = original_file_name or "Uploaded video"
+
+            else:
+                if not youtube_id:
+                    raise ValueError("youtube_id is required for YouTube source.")
+
+                update_parent_job(
+                    job_id=job_id,
+                    progress=25,
+                    message="Downloading YouTube video.",
+                )
+
+                video_path, video_title = download_youtube_video(
+                    youtube_id=youtube_id,
+                    workdir=workdir,
+                )
 
             update_parent_job(
                 job_id=job_id,
@@ -591,13 +659,17 @@ def process_video_background(
                 job_id=job_id,
                 youtube_id=youtube_id,
                 video_path=video_path,
+                namespace=job_id,
+                source_type=source_type,
+                media_blob_url=media_blob_url,
+                original_file_name=original_file_name,
             )
 
             update_video_job(
                 job_id=job_id,
                 visual_status="ready",
                 visual_indexed_count=indexed_count,
-                pinecone_namespace=youtube_id,
+                pinecone_namespace=job_id,
             )
 
         update_parent_job(
@@ -647,8 +719,12 @@ def process_video_background(
 def start_video_processing(payload: StartVideoRequest):
     function_call = process_video_background.spawn(
         job_id=payload.job_id,
+        source_type=payload.source_type,
         youtube_url=payload.youtube_url,
         youtube_id=payload.youtube_id,
+        media_blob_name=payload.media_blob_name,
+        media_blob_url=payload.media_blob_url,
+        original_file_name=payload.original_file_name,
     )
 
     update_parent_job(
@@ -662,7 +738,7 @@ def start_video_processing(payload: StartVideoRequest):
     update_video_job(
         job_id=payload.job_id,
         visual_status="queued",
-        pinecone_namespace=payload.youtube_id,
+        pinecone_namespace=payload.job_id,
     )
 
     return {

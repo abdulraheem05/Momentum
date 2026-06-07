@@ -37,6 +37,7 @@ image = (
         "Pillow",
         "pinecone",
         "numpy",
+        "azure-storage-blob",
     )
 )
 

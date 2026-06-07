@@ -37,8 +37,16 @@ image = (
 
 class ProcessYouTubeRequest(BaseModel):
     job_id: str
-    youtube_url: str
-    youtube_id: str
+    source_type: str = "youtube"
+
+    youtube_url: str | None = None
+    youtube_id: str | None = None
+
+    media_blob_name: str | None = None
+    media_blob_url: str | None = None
+    original_file_name: str | None = None
+
+    mode: str = "audio"
 
 
 def now_iso() -> str:
@@ -191,6 +199,61 @@ def download_youtube_audio(youtube_url: str, workdir: str) -> tuple[str, str]:
 
     return audio_path, video_title
 
+def download_uploaded_media(
+    media_blob_name: str,
+    workdir: str,
+) -> str:
+    from azure.storage.blob import BlobServiceClient
+
+    connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+    container_name = os.environ.get("AZURE_UPLOADS_CONTAINER", "momentum-uploads")
+
+    extension = os.path.splitext(media_blob_name)[1] or ".mp4"
+    output_path = os.path.join(workdir, f"uploaded-media{extension}")
+
+    blob_service = BlobServiceClient.from_connection_string(connection_string)
+
+    blob_client = blob_service.get_blob_client(
+        container=container_name,
+        blob=media_blob_name,
+    )
+
+    with open(output_path, "wb") as file:
+        stream = blob_client.download_blob()
+        file.write(stream.readall())
+
+    return output_path
+
+
+def extract_audio_from_media(media_path: str, workdir: str) -> str:
+    import subprocess
+
+    output_path = os.path.join(workdir, "uploaded-audio.mp3")
+
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i", media_path,
+        "-vn",
+        "-acodec", "libmp3lame",
+        "-ar", "16000",
+        "-ac", "1",
+        "-b:a", "64k",
+        output_path,
+    ]
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr}")
+
+    return output_path
+
 
 def transcribe_with_groq(audio_path: str) -> List[Dict[str, Any]]:
     """
@@ -290,8 +353,12 @@ def upload_transcript_to_azure(
 )
 def process_youtube_video_background(
     job_id: str,
-    youtube_url: str,
-    youtube_id: str,
+    source_type: str = "youtube",
+    youtube_url: str | None = None,
+    youtube_id: str | None = None,
+    media_blob_name: str | None = None,
+    media_blob_url: str | None = None,
+    original_file_name: str | None = None,
 ) -> Dict[str, Any]:
     try:
         update_parent_job(
@@ -308,17 +375,44 @@ def process_youtube_video_background(
         )
 
         with tempfile.TemporaryDirectory() as workdir:
-            update_parent_job(
-                job_id=job_id,
-                status="processing",
-                progress=25,
-                message="Downloading and extracting YouTube audio.",
-            )
+            if source_type == "upload":
+                if not media_blob_name:
+                    raise ValueError("media_blob_name is required for upload source.")
 
-            audio_path, video_title = download_youtube_audio(
-                youtube_url=youtube_url,
-                workdir=workdir,
-            )
+                update_parent_job(
+                    job_id=job_id,
+                    status="processing",
+                    progress=25,
+                    message="Downloading uploaded file.",
+                )
+
+                media_path = download_uploaded_media(
+                    media_blob_name=media_blob_name,
+                    workdir=workdir,
+                )
+
+                update_parent_job(
+                    job_id=job_id,
+                    status="processing",
+                    progress=40,
+                    message="Extracting audio from uploaded file.",
+                )
+
+                audio_path = extract_audio_from_media(
+                    media_path=media_path,
+                    workdir=workdir,
+                )
+
+                video_title = original_file_name or "Uploaded audio"
+
+            else:
+                if not youtube_url:
+                    raise ValueError("youtube_url is required for YouTube source.")
+
+                audio_path, video_title = download_youtube_audio(
+                    youtube_url=youtube_url,
+                    workdir=workdir,
+                )
 
             update_parent_job(
                 job_id=job_id,
@@ -337,8 +431,11 @@ def process_youtube_video_background(
 
             transcript_data = {
                 "job_id": job_id,
+                "source_type": source_type,
                 "youtube_id": youtube_id,
                 "youtube_url": youtube_url,
+                "media_blob_url": media_blob_url,
+                "original_file_name": original_file_name,
                 "video_title": video_title,
                 "created_at": now_iso(),
                 "segments": segments,
@@ -424,8 +521,12 @@ def start_youtube_processing(payload: ProcessYouTubeRequest):
 
     function_call = process_youtube_video_background.spawn(
         job_id=payload.job_id,
+        source_type=payload.source_type,
         youtube_url=payload.youtube_url,
         youtube_id=payload.youtube_id,
+        media_blob_name=payload.media_blob_name,
+        media_blob_url=payload.media_blob_url,
+        original_file_name=payload.original_file_name,
     )
 
     update_parent_job(
