@@ -15,7 +15,7 @@ from app.job_repository import (
     create_upload_job
 )
 
-from app.azure_utils import load_transcript_json, upload_media_file_to_azure, delete_media_blob_from_azure
+from app.azure_utils import load_transcript_json, upload_media_file_to_azure, delete_media_blob_from_azure, create_upload_sas_url
 from app.search.dialogue_search import search_dialogue_in_transcript
 from app.search.visual_search import warmup_clip_model, search_visual_scenes_backend
 
@@ -44,6 +44,19 @@ class SearchDialogueRequest(BaseModel):
     job_id: str
     query: str
 
+class CompleteUploadRequest(BaseModel):
+    filename: str
+    mode: str
+    blob_name: str
+    blob_url: str
+    content_type: str | None = None
+    file_size: int | None = None
+    
+class CreateUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str | None = None
+    mode: str = "video"
+    file_size: int | None = None
 
 @app.get("/")
 def health_check():
@@ -140,6 +153,84 @@ def get_upload_job(job_id: str):
 
     return job
 
+@app.post("/upload/presign")
+def create_upload_presigned_url(payload: CreateUploadUrlRequest):
+    try:
+        mode = payload.mode.lower().strip()
+
+        if mode not in {"video", "audio"}:
+            raise HTTPException(
+                status_code=400,
+                detail="mode must be either 'video' or 'audio'.",
+            )
+
+        job_id_for_blob = str(uuid.uuid4())
+
+        upload_info = create_upload_sas_url(
+            filename=payload.filename,
+            content_type=payload.content_type,
+            job_id=job_id_for_blob,
+        )
+
+        return {
+            "source_type": "upload",
+            "mode": mode,
+            "filename": payload.filename,
+            "file_size": payload.file_size,
+            **upload_info,
+        }
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+    
+
+@app.post("/upload/complete")
+def complete_direct_upload(
+    payload: CompleteUploadRequest,
+    background_tasks: BackgroundTasks,
+):
+    try:
+        mode = payload.mode.lower().strip()
+
+        if mode not in {"video", "audio"}:
+            raise HTTPException(
+                status_code=400,
+                detail="mode must be either 'video' or 'audio'.",
+            )
+
+        job = create_upload_job(
+            original_file_name=payload.filename,
+            media_blob_name=payload.blob_name,
+            media_blob_url=payload.blob_url,
+            media_content_type=payload.content_type or "application/octet-stream",
+            media_file_size=payload.file_size or 0,
+            mode=mode,
+        )
+
+        trigger_modal_upload_processing(
+            job_id=job["id"],
+            media_blob_name=payload.blob_name,
+            media_blob_url=payload.blob_url,
+            original_file_name=payload.filename,
+            mode=mode,
+        )
+
+        if mode == "video":
+            background_tasks.add_task(warmup_clip_model)
+
+        return {
+            "job_id": job["id"],
+            "source_type": "upload",
+            "mode": mode,
+            "status": "queued",
+            "progress": 15,
+            "message": "File uploaded. Processing started.",
+            "file_name": payload.filename,
+            "media_blob_url": payload.blob_url,
+        }
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 @app.post("/upload/search-visual")
 def search_upload_visual(payload: SearchVisualRequest):

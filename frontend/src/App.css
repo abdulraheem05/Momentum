@@ -337,6 +337,8 @@ button {
   border: 1px solid #fecdd3;
   color: #be123c;
   animation: previewIn 260ms ease both;
+  position: relative;
+  z-index: 999;
 }
 
 .error-message strong {
@@ -878,7 +880,7 @@ button {
     0 24px 70px rgba(15, 23, 42, 0.16),
     0 8px 24px rgba(15, 23, 42, 0.08);
   backdrop-filter: blur(24px);
-  z-index: 9999;
+  z-index: 10000;
   animation: modeMenuIn 0.18s ease forwards;
   transform-origin: top left;
 }
@@ -897,6 +899,7 @@ button {
 }
 
 .mode-menu-item {
+  position: relative;
   width: 100%;
   min-height: 68px;
   padding: 11px 13px;
@@ -1177,12 +1180,34 @@ button {
   height: 54px;
   margin-bottom: 12px;
   border-radius: 14px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: linear-gradient(135deg, #dbeafe, #60a5fa);
   color: #ffffff;
   font-size: 24px;
   box-shadow: 0 14px 26px rgba(37, 99, 235, 0.18);
+  overflow: hidden;
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms ease;
+}
+
+.upload-icon-card img {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  display: block;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.upload-dropzone.dragging .upload-icon-card {
+  transform: scale(1.05) rotate(-4deg);
+  box-shadow: 0 18px 34px rgba(37, 99, 235, 0.22);
+}
+
+.upload-dropzone.dragging .upload-icon-card img {
+  transform: scale(1.05);
 }
 
 .upload-dropzone strong {
@@ -1285,6 +1310,44 @@ button {
 .momentum-app.mode-menu-open .demo-note {
   margin-top: 170px;
   transition: margin-top 220ms ease;
+}
+
+.upload-dropzone.dragging {
+  border-color: rgba(37, 99, 235, 0.8);
+  background: rgba(239, 246, 255, 0.96);
+  transform: translateY(-2px);
+  box-shadow: 0 18px 45px rgba(37, 99, 235, 0.12);
+}
+
+.local-upload-note {
+  margin: 8px auto 0;
+  max-width: 560px;
+  color: #64748bb3;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  font-weight: 400;
+}
+
+.language-badge {
+  position: absolute;
+  
+  right: 18px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #eef6ff;
+  border: 1px solid #bfdbfe;
+  color: #2563eb;
+
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
 
 @keyframes uploadModeMenuIn {

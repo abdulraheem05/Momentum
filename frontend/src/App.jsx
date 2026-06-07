@@ -212,7 +212,8 @@ export default function App() {
   const [sourceType, setSourceType] = useState("youtube"); // "youtube" | "upload"
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploadingFile, setIsUploadingFile] = useState(false);  
+  const [isUploadingFile, setIsUploadingFile] = useState(false); 
+  const [isDraggingFile, setIsDraggingFile] = useState(false); 
 
   const pollRef = useRef(null);
   const modePickerRef = useRef(null);
@@ -385,6 +386,15 @@ export default function App() {
         err?.response?.data?.detail ||
           "Could not read the job status. Check whether the backend is running."
       );
+
+      setSelectedFile(null);
+      setUploadProgress(0);
+      setIsUploadingFile(false);
+      setIsCreatingJob(false);
+      setJob(null);
+      setJobId("");
+      setModeMenuOpen(false);
+      setCurrentVerbose("Waiting to start...");
     }
   };
 
@@ -477,13 +487,24 @@ export default function App() {
     setIsUploadingFile(true);
     setIsCreatingJob(true);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("mode", mode);
+    const presignResponse = await axios.post(`${API}/upload/presign`, {
+      filename: file.name,
+      content_type: file.type || "application/octet-stream",
+      file_size: file.size,
+      mode,
+    });
 
-    const response = await axios.post(`${API}/upload/jobs`, formData, {
+    const {
+      sas_upload_url,
+      blob_name,
+      blob_url,
+      content_type,
+    } = presignResponse.data;
+
+    await axios.put(sas_upload_url, file, {
       headers: {
-        "Content-Type": "multipart/form-data",
+        "x-ms-blob-type": "BlockBlob",
+        "Content-Type": file.type || "application/octet-stream",
       },
       onUploadProgress: (progressEvent) => {
         if (!progressEvent.total) return;
@@ -495,7 +516,7 @@ export default function App() {
         setUploadProgress(percent);
 
         if (percent < 100) {
-          setCurrentVerbose("Uploading file to cloud storage...");
+          setCurrentVerbose("Uploading file directly to cloud storage...");
         } else {
           setCurrentVerbose("File uploaded. Starting processing...");
           setJob({
@@ -503,42 +524,73 @@ export default function App() {
             source_type: "upload",
             mode,
             status: "processing",
-            progress: 8,
-            message: "Saving file to cloud storage...",
+            progress: 10,
+            message: "Creating processing job...",
             original_file_name: file.name,
             media_content_type: file.type,
           });
-
-          setDisplayProgress(8);
+          setDisplayProgress(10);
         }
       },
     });
 
-    setJobId(response.data.job_id);
-
-    setJob({
-      id: response.data.job_id,
-      source_type: "upload",
-      mode: response.data.mode || mode,
-      status: response.data.status || "queued",
-      progress: response.data.progress || 15,
-      message: response.data.message || "File uploaded. Processing started.",
-      original_file_name: response.data.file_name,
-      media_blob_url: response.data.media_blob_url,
+    const completeResponse = await axios.post(`${API}/upload/complete`, {
+      filename: file.name,
+      mode,
+      blob_name,
+      blob_url,
+      content_type: content_type || file.type || "application/octet-stream",
+      file_size: file.size,
     });
 
-    setCurrentVerbose(response.data.message || "File uploaded. Processing started.");
-    pollJob(response.data.job_id, "upload");
+    setJobId(completeResponse.data.job_id);
+
+    setJob({
+      id: completeResponse.data.job_id,
+      source_type: "upload",
+      mode: completeResponse.data.mode || mode,
+      status: completeResponse.data.status || "queued",
+      progress: completeResponse.data.progress || 15,
+      message: completeResponse.data.message || "File uploaded. Processing started.",
+      original_file_name: completeResponse.data.file_name,
+      media_blob_url: completeResponse.data.media_blob_url,
+    });
+
+    setCurrentVerbose(completeResponse.data.message || "File uploaded. Processing started.");
+    pollJob(completeResponse.data.job_id, "upload");
   } catch (err) {
-    setError(
-      err?.response?.data?.detail ||
-        "Could not upload file. Check backend, Azure settings, and file size."
-    );
+      setError(
+        err?.response?.data?.detail ||
+          "Could not upload file. Check backend, Azure settings, and file size."
+      );
+
+      setSelectedFile(null);
+      setUploadProgress(0);
+      setIsUploadingFile(false);
+      setIsCreatingJob(false);
+      setJob(null);
+      setJobId("");
+      setModeMenuOpen(false);
+      setCurrentVerbose("Waiting to start...");
+
   } finally {
     setIsUploadingFile(false);
     setIsCreatingJob(false);
   }
 };
+
+  const handleDroppedFile = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setIsDraggingFile(false);
+
+    const file = event.dataTransfer.files?.[0];
+
+    if (file) {
+      startUploadProcessing(file);
+    }
+  };
 
   const searchMomentum = async () => {
     const cleanQuery = query.trim();
@@ -724,7 +776,10 @@ export default function App() {
                               </span>
 
                               <span className="mode-copy">
-                                <strong>{item.label}</strong>
+                                <strong>
+                                  {item.label}
+                                  {item.id === "audio" && <span className="language-badge">EN</span>}
+                                </strong>
                                 <small>{item.description}</small>
                               </span>
                             </button>
@@ -765,13 +820,36 @@ export default function App() {
               )}
             </>
           ) : (
+
             <div className={cx("upload-composer", modeMenuOpen && "mode-open")}>
+              <p className="local-upload-note">
+              Local file processing can be slower due to upload speed limit. For a quicker demo, try YouTube search.
+            </p>
               <label
                 className={cx(
                   "upload-dropzone",
+                  isDraggingFile && "dragging",
                   (isCreatingJob || isUploadingFile) && "uploading"
                 )}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingFile(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingFile(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingFile(false);
+                }}
+                onDrop={handleDroppedFile}
               >
+                
+
                 <input
                   type="file"
                   accept="video/*,audio/*"
@@ -784,7 +862,7 @@ export default function App() {
                 />
 
                 <div className="upload-icon-card">
-                  <span>▴</span>
+                  <img src="/icons/Files.png" alt="" />
                 </div>
 
                 <strong>
@@ -842,7 +920,10 @@ export default function App() {
                             </span>
 
                             <span className="mode-copy">
-                              <strong>{item.label}</strong>
+                              <strong>
+                                {item.label}
+                                {item.id === "audio" && <span className="language-badge">EN</span>}
+                              </strong>
                               <small>{item.description}</small>
                             </span>
                           </button>
