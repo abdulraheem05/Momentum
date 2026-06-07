@@ -76,6 +76,23 @@ def download_media_blob_to_file(
 
     return output_path
 
+def delete_media_blob_from_azure(blob_name: str) -> bool:
+    if not blob_name:
+        return False
+
+    blob_service = get_blob_service_client()
+
+    blob_client = blob_service.get_blob_client(
+        container=settings.AZURE_UPLOADS_CONTAINER,
+        blob=blob_name,
+    )
+
+    try:
+        blob_client.delete_blob()
+        return True
+    except Exception as error:
+        print(f"[Azure cleanup] Could not delete blob {blob_name}: {error}")
+        return False
 
 def load_transcript_json(blob_name: str) -> Dict[str, Any]:
     """

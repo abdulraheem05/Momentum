@@ -586,7 +586,20 @@ export default function App() {
     }
   };
 
-  const resetWorkspace = () => {
+  const cleanupUploadedFile = async () => {
+    if (sourceType !== "upload") return;
+    if (!jobId) return;
+
+    try {
+      await axios.delete(`${API}/upload/jobs/${jobId}/file`);
+    } catch (err) {
+      console.warn("Could not delete uploaded Azure file:", err);
+    }
+  };
+
+  const resetWorkspace = async () => {
+    await cleanupUploadedFile();
+
     stopPolling();
     setMode("video");
     setYoutubeUrl("");

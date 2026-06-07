@@ -15,7 +15,7 @@ from app.job_repository import (
     create_upload_job
 )
 
-from app.azure_utils import load_transcript_json, upload_media_file_to_azure
+from app.azure_utils import load_transcript_json, upload_media_file_to_azure, delete_media_blob_from_azure
 from app.search.dialogue_search import search_dialogue_in_transcript
 from app.search.visual_search import warmup_clip_model, search_visual_scenes_backend
 
@@ -150,6 +150,43 @@ def search_upload_visual(payload: SearchVisualRequest):
 def search_upload_dialogue(payload: SearchDialogueRequest):
     return search_dialogue(payload)
 
+@app.delete("/upload/jobs/{job_id}/file")
+def delete_uploaded_file(job_id: str):
+    try:
+        job = get_youtube_job_with_details(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+
+        if job.get("source_type") != "upload":
+            return {
+                "ok": True,
+                "deleted": False,
+                "message": "Job is not a local upload job.",
+            }
+
+        blob_name = job.get("media_blob_name")
+
+        if not blob_name:
+            return {
+                "ok": True,
+                "deleted": False,
+                "message": "No uploaded blob found for this job.",
+            }
+
+        deleted = delete_media_blob_from_azure(blob_name)
+
+        return {
+            "ok": True,
+            "deleted": deleted,
+            "blob_name": blob_name,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 @app.post("/youtube/jobs")
 def create_youtube_job(payload: CreateYouTubeJobRequest, background_tasks: BackgroundTasks):
