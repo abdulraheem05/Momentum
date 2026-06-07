@@ -86,13 +86,25 @@ function formatScore(score) {
   return `${Math.round(Number(score) * 100)}% match`;
 }
 
-function getThinkingTitle(job, selectedMode, isCreatingJob) {
-  if (isCreatingJob) return "Creating Momentum job";
-  if (!job) return "Waiting for a YouTube URL";
+function getThinkingTitle(job, selectedMode, isCreatingJob, sourceType = "youtube") {
+  if (isCreatingJob) {
+    return sourceType === "upload" ? "Uploading local file" : "Creating Momentum job";
+  }
+
+  if (!job) {
+    return sourceType === "upload" ? "Waiting for a local file" : "Waiting for a YouTube URL";
+  }
+
   if (job.status === "ready") {
     return selectedMode === "video" ? "Video scene index ready" : "Audio transcript ready";
   }
+
   if (job.status === "failed") return "Processing failed";
+
+  if (job.status === "queued") {
+    return sourceType === "upload" ? "File submitted for processing" : "Video submitted for processing";
+  }
+
   return job.message || "Momentum is processing";
 }
 
@@ -141,6 +153,44 @@ function formatDuration(ms) {
   return `${seconds} sec`;
 }
 
+function formatTimestamp(seconds) {
+  const totalSeconds = Math.floor(Number(seconds || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function buildYouTubeTimestampUrl(urlOrId, seconds) {
+  const cleanValue = String(urlOrId || "").trim();
+  const timestamp = Math.floor(Number(seconds || 0));
+
+  const youtubeId = cleanValue.includes("youtube") || cleanValue.includes("youtu.be")
+    ? getYouTubeId(cleanValue)
+    : cleanValue;
+
+  return youtubeId
+    ? `https://www.youtube.com/watch?v=${youtubeId}&t=${timestamp}s`
+    : "";
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return "";
+
+  const mb = bytes / (1024 * 1024);
+
+  if (mb >= 1) {
+    return `${mb.toFixed(1)} MB`;
+  }
+
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
 export default function App() {
   const [mode, setMode] = useState("video");
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -159,6 +209,10 @@ export default function App() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [processingStartTime, setProcessingStartTime] = useState(null);
   const [processingDuration, setProcessingDuration] = useState(null);
+  const [sourceType, setSourceType] = useState("youtube"); // "youtube" | "upload"
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);  
 
   const pollRef = useRef(null);
   const modePickerRef = useRef(null);
@@ -275,50 +329,55 @@ export default function App() {
     }
   };
 
-  const pollJob = (id) => {
-    stopPolling();
+  const pollJob = (id, source = sourceType) => {
+  stopPolling();
 
-    const fetchJob = async () => {
-      try {
-        const response = await axios.get(`${API}/youtube/jobs/${id}`);
-        const latestJob = response.data;
+  const fetchJob = async () => {
+    try {
+      const endpoint =
+        source === "upload"
+          ? `${API}/upload/jobs/${id}`
+          : `${API}/youtube/jobs/${id}`;
 
-        setJob(latestJob);
+      const response = await axios.get(endpoint);
+      const latestJob = response.data;
 
-        if (latestJob.status === "ready" || latestJob.status === "failed") {
-          stopPolling();
+      setJob(latestJob);
 
-          setProcessingStartTime((startedAt) => {
-            if (startedAt) {
-              const duration = Date.now() - startedAt;
-              setProcessingDuration(duration);
-
-              if (latestJob.status === "ready") {
-                setCurrentVerbose(
-                  `Task completed in ${formatDuration(duration)}. You can now search this video.`
-                );
-              } else {
-                setCurrentVerbose(
-                  `Task stopped after ${formatDuration(duration)} because processing failed.`
-                );
-              }
-            }
-
-            return startedAt;
-          });
-        }
-      } catch (err) {
+      if (latestJob.status === "ready" || latestJob.status === "failed") {
         stopPolling();
-        setError(
-          err?.response?.data?.detail ||
-            "Could not read the job status. Check whether the backend is running."
-        );
-      }
-    };
 
-    fetchJob();
-    pollRef.current = setInterval(fetchJob, 2400);
+        setProcessingStartTime((startedAt) => {
+          if (startedAt) {
+            const duration = Date.now() - startedAt;
+            setProcessingDuration(duration);
+
+            if (latestJob.status === "ready") {
+              setCurrentVerbose(
+                `Task completed in ${formatDuration(duration)}. You can now search this ${source === "upload" ? "file" : "video"}.`
+              );
+            } else {
+              setCurrentVerbose(
+                `Task stopped after ${formatDuration(duration)} because processing failed.`
+              );
+            }
+          }
+
+          return startedAt;
+        });
+      }
+    } catch (err) {
+      stopPolling();
+      setError(
+        err?.response?.data?.detail ||
+          "Could not read the job status. Check whether the backend is running."
+      );
+    }
   };
+
+  fetchJob();
+  pollRef.current = setInterval(fetchJob, 2400);
+};
 
   const startProcessing = async () => {
     const cleanUrl = youtubeUrl.trim();
@@ -342,6 +401,9 @@ export default function App() {
       setQuery("");
       setJob(null);
       setJobId("");
+      setSourceType("youtube");
+      setUploadProgress(0);
+      setSelectedFile(null);
 
       setProcessingStartTime(startedAt);
       setProcessingDuration(null);
@@ -366,7 +428,7 @@ export default function App() {
         message: response.data.message || `${MODE_OPTIONS[mode].label} job created.`,
       });
 
-      pollJob(response.data.job_id);
+      pollJob(response.data.job_id, "youtube");
     } catch (err) {
       setError(
         err?.response?.data?.detail ||
@@ -377,6 +439,82 @@ export default function App() {
     }
   };
 
+  const startUploadProcessing = async (file) => {
+  if (!file) return;
+
+  try {
+    const startedAt = Date.now();
+
+    setError("");
+    setResults([]);
+    setQuery("");
+    setJob(null);
+    setJobId("");
+    setSubmittedUrl("");
+    setYoutubeUrl("");
+    setVideoMeta(null);
+
+    setSelectedFile(file);
+    setProcessingStartTime(startedAt);
+    setProcessingDuration(null);
+
+    setCurrentVerbose("Uploading file...");
+    setDisplayProgress(0);
+    setUploadProgress(0);
+    setIsUploadingFile(true);
+    setIsCreatingJob(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mode", mode);
+
+    const response = await axios.post(`${API}/upload/jobs`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      onUploadProgress: (progressEvent) => {
+        if (!progressEvent.total) return;
+
+        const percent = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total
+        );
+
+        setUploadProgress(percent);
+
+        if (percent < 100) {
+          setCurrentVerbose(`Uploading file... ${percent}%`);
+        } else {
+          setCurrentVerbose("File uploaded. Starting processing...");
+        }
+      },
+    });
+
+    setJobId(response.data.job_id);
+
+    setJob({
+      id: response.data.job_id,
+      source_type: "upload",
+      mode: response.data.mode || mode,
+      status: response.data.status || "queued",
+      progress: response.data.progress || 5,
+      message: response.data.message || "File uploaded. Processing started.",
+      original_file_name: response.data.file_name,
+      media_blob_url: response.data.media_blob_url,
+    });
+
+    setCurrentVerbose(response.data.message || "File uploaded. Processing started.");
+    pollJob(response.data.job_id, "upload");
+  } catch (err) {
+    setError(
+      err?.response?.data?.detail ||
+        "Could not upload file. Check backend, Azure settings, and file size."
+    );
+  } finally {
+    setIsUploadingFile(false);
+    setIsCreatingJob(false);
+  }
+};
+
   const searchMomentum = async () => {
     const cleanQuery = query.trim();
 
@@ -386,7 +524,7 @@ export default function App() {
     }
 
     if (!jobId) {
-      setError("Process a YouTube video first.");
+      setError(sourceType === "upload" ? "Upload and process a file first." : "Process a YouTube video first.");
       return;
     }
 
@@ -395,10 +533,17 @@ export default function App() {
       setIsSearching(true);
       setResults([]);
 
-      const response = await axios.post(`${API}${selectedMode.searchEndpoint}`, {
-        job_id: jobId,
-        query: cleanQuery,
-      });
+      const searchEndpoint =
+      sourceType === "upload"
+        ? mode === "video"
+          ? "/upload/search-visual"
+          : "/upload/search-dialogue"
+        : selectedMode.searchEndpoint;
+
+    const response = await axios.post(`${API}${searchEndpoint}`, {
+      job_id: jobId,
+      query: cleanQuery,
+    });
 
       setResults(response.data.results || []);
     } catch (err) {
@@ -429,6 +574,10 @@ export default function App() {
     setIsFetchingMeta(false);
     setProcessingStartTime(null);
     setProcessingDuration(null);
+    setSourceType("youtube");
+    setSelectedFile(null);
+    setUploadProgress(0);
+    setIsUploadingFile(false);
   };
 
   return (
