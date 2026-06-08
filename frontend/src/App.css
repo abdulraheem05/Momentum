@@ -1,3 +1,30 @@
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+input,
+label,
+.upload-dropzone,
+.mode-trigger,
+.mode-menu-item,
+.source-switcher button,
+.send-button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button:focus,
+button:active,
+a:focus,
+a:active,
+input:focus,
+input:active {
+  -webkit-tap-highlight-color: transparent;
+}
+
 :root {
   color-scheme: light;
   font-family: "Google Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -493,6 +520,14 @@ button {
 
 .liquid-orb.failed .liquid {
   background: linear-gradient(135deg, #fb7185, #f97316);
+}
+
+.mobile-verbose-dots {
+  display: none;
+}
+
+.desktop-dots {
+  display: inline-flex;
 }
 
 .tick-mark {
@@ -1607,5 +1642,24 @@ button {
     padding-top: 28px;
     font-size: 12px;
     line-height: 1.5;
+  }
+
+  .desktop-dots {
+    display: none;
+  }
+
+  .mobile-verbose-dots {
+    display: inline-flex;
+    justify-content: center;
+    margin-top: -4px;
+  }
+
+  .thinking-copy {
+    gap: 8px;
+  }
+
+  .verbose-single {
+    text-align: center;
+    max-width: min(92vw, 360px);
   }
 }

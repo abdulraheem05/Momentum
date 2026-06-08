@@ -225,6 +225,8 @@ export default function App() {
   const modePickerRef = useRef(null);
   const uploadModeRowRef = useRef(null);
   const youtubeInputRef = useRef(null);
+  const thinkingStageRef = useRef(null);
+  const resultsPanelRef = useRef(null);
 
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
@@ -283,20 +285,31 @@ export default function App() {
   }, [youtubeUrl]);
 
   useEffect(() => {
-    const exitTimer = setTimeout(() => {
-      setSplashExiting(true);
-      setAppReady(true);
-    }, 2600);
+      const exitTimer = setTimeout(() => {
+        setSplashExiting(true);
+        setAppReady(true);
+      }, 2600);
 
-    const removeTimer = setTimeout(() => {
-      setShowSplash(false);
-    }, 3300);
+      const removeTimer = setTimeout(() => {
+        setShowSplash(false);
+      }, 3300);
 
-    return () => {
-      clearTimeout(exitTimer);
-      clearTimeout(removeTimer);
-    };
-  }, []);
+      return () => {
+        clearTimeout(exitTimer);
+        clearTimeout(removeTimer);
+      };
+    }, []);
+
+    useEffect(() => {
+    if (!hasStarted) return;
+
+    setTimeout(() => {
+      thinkingStageRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 250);
+  }, [hasStarted]);
 
   useEffect(() => {
     if (!job?.message && !job?.status) return;
@@ -318,12 +331,24 @@ export default function App() {
       }
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("pointerdown", handleClickOutside);
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("pointerdown", handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (isSearching) return;
+    if (results.length === 0) return;
+
+    setTimeout(() => {
+      resultsPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 250);
+  }, [results.length, isSearching]);
 
   useEffect(() => {
       const target = progress;
@@ -500,6 +525,15 @@ export default function App() {
     return;
   }
 
+  const scrollToResults = () => {
+    setTimeout(() => {
+      resultsPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 250);
+  };
+
   try {
     const startedAt = Date.now();
 
@@ -662,6 +696,7 @@ export default function App() {
     );
 
     setResults(sortedResults);
+    scrollToResults();
 
     } catch (err) {
       setError(
@@ -818,7 +853,11 @@ export default function App() {
                     <button
                       type="button"
                       className="mode-trigger"
-                      onClick={() => setModeMenuOpen((prev) => !prev)}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setModeMenuOpen((prev) => !prev);
+                      }}
                     >
                       <span className="mode-icon-slot">
                         {mode === "video" ? (
@@ -843,7 +882,7 @@ export default function App() {
                               key={item.id}
                               type="button"
                               className={selected ? "mode-menu-item selected" : "mode-menu-item"}
-                              onClick={(e) => {
+                              onPointerDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setMode(item.id);
@@ -963,8 +1002,11 @@ export default function App() {
                   <button
                     type="button"
                     className="mode-trigger"
-                    onClick={() => setModeMenuOpen((prev) => !prev)}
-                    disabled={isCreatingJob || (!!jobId && !isFailed)}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setModeMenuOpen((prev) => !prev);
+                    }}
                   >
                     <span className="mode-icon-slot">
                       {mode === "video" ? (
@@ -989,7 +1031,7 @@ export default function App() {
                             key={item.id}
                             type="button"
                             className={selected ? "mode-menu-item selected" : "mode-menu-item"}
-                            onClick={(e) => {
+                            onPointerDown={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
                               setMode(item.id);
@@ -1089,7 +1131,7 @@ export default function App() {
               </div>
             </article>
 
-            <section className="thinking-stage">
+            <section className="thinking-stage" ref={thinkingStageRef}>
               <div
                 className={cx("liquid-orb", isReady && "complete", isFailed && "failed")}
                 style={{
@@ -1114,8 +1156,9 @@ export default function App() {
               <div className="thinking-copy">
                 <div className="thinking-line-main">
                   <span>{getThinkingTitle(job, mode, isCreatingJob, sourceType)}</span>
+
                   {!isReady && !isFailed && (
-                    <span className="typing-dots" aria-hidden="true">
+                    <span className="typing-dots desktop-dots" aria-hidden="true">
                       <i />
                       <i />
                       <i />
@@ -1126,6 +1169,14 @@ export default function App() {
                 <div className="verbose-single" key={currentVerbose}>
                   <p className="verbose-item active">{currentVerbose}</p>
                 </div>
+
+                {!isReady && !isFailed && (
+                  <span className="typing-dots mobile-verbose-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                )}
               </div>
             </section>
 
@@ -1167,7 +1218,7 @@ export default function App() {
             )}
 
             {(isSearching || results.length > 0) && (
-              <section className="results-panel">
+              <section className="results-panel" ref={resultsPanelRef}>
                 {isSearching && (
                   <div className="search-thinking">
                     <span>Searching the {mode === "video" ? "visual index" : "transcript"}</span>
