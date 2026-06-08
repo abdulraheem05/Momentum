@@ -227,6 +227,7 @@ export default function App() {
   const youtubeInputRef = useRef(null);
   const thinkingStageRef = useRef(null);
   const resultsPanelRef = useRef(null);
+  const querySectionRef = useRef(null);
 
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
@@ -339,18 +340,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isSearching) return;
-    if (results.length === 0) return;
-
-    setTimeout(() => {
-      resultsPanelRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 250);
-  }, [results.length, isSearching]);
-
-  useEffect(() => {
       const target = progress;
 
       const interval = setInterval(() => {
@@ -391,6 +380,15 @@ export default function App() {
     }
   };
 
+  const scrollToResults = () => {
+    setTimeout(() => {
+      resultsPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 350);
+  };
+  
   const pollJob = (id, source = sourceType) => {
   stopPolling();
 
@@ -415,6 +413,13 @@ export default function App() {
             setProcessingDuration(duration);
 
             if (latestJob.status === "ready") {
+              setTimeout(() => {
+                querySectionRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                });
+              }, 300);
+
               setCurrentVerbose(
                 `Task completed in ${formatDuration(duration)}. You can now search this ${source === "upload" ? "file" : "video"}.`
               );
@@ -524,15 +529,6 @@ export default function App() {
     setModeMenuOpen(false);
     return;
   }
-
-  const scrollToResults = () => {
-    setTimeout(() => {
-      resultsPanelRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 250);
-  };
 
   try {
     const startedAt = Date.now();
@@ -696,7 +692,10 @@ export default function App() {
     );
 
     setResults(sortedResults);
-    scrollToResults();
+    
+    setTimeout(() => {
+      scrollToResults();
+    }, 100);
 
     } catch (err) {
       setError(
@@ -1181,7 +1180,7 @@ export default function App() {
             </section>
 
             {isReady && (
-              <section className="query-section">
+              <section className="query-section" ref={querySectionRef}>
                 <div className="query-heading">
                   <h3>{mode === "video" ? "Describe a scene" : "Search the dialogue"}</h3>
                   <p>

@@ -1444,6 +1444,14 @@ button {
     transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.typing-dots.mobile-verbose-dots {
+  display: none;
+}
+
+.typing-dots.desktop-dots {
+  display: inline-flex;
+}
+
 @keyframes splashScreenExit {
   0% {
     opacity: 1;
