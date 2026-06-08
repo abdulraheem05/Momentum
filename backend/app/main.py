@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException
+import threading
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
@@ -17,9 +19,32 @@ from app.job_repository import (
 
 from app.azure_utils import load_transcript_json, upload_media_file_to_azure, delete_media_blob_from_azure, create_upload_sas_url
 from app.search.dialogue_search import search_dialogue_in_transcript
-from app.search.visual_search import warmup_clip_model, search_visual_scenes_backend
 
-app = FastAPI(title="Momentum YouTube V1 Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(
+        target=warmup_clip_in_background,
+        daemon=True,
+    ).start()
+
+    yield
+
+app = FastAPI(title="Momentum YouTube V1 Backend",lifespan=lifespan)
+
+def warmup_clip_in_background():
+    try:
+        from app.search.visual_search import warmup_clip_model
+        warmup_clip_model()
+    except Exception as error:
+        print(f"[startup warmup] CLIP warmup failed: {error}")
+
+
+@app.on_event("startup")
+def startup_event():
+    threading.Thread(
+        target=warmup_clip_in_background,
+        daemon=True,
+    ).start()
 
 
 app.add_middleware(
@@ -124,6 +149,7 @@ async def create_local_upload_job(
             )
 
         if mode == "video":
+            from app.search.visual_search import warmup_clip_model
             background_tasks.add_task(warmup_clip_model)
 
         return {
@@ -216,6 +242,7 @@ def complete_direct_upload(
         )
 
         if mode == "video":
+            from app.search.visual_search import warmup_clip_model
             background_tasks.add_task(warmup_clip_model)
 
         return {
@@ -319,6 +346,7 @@ def create_youtube_job(payload: CreateYouTubeJobRequest, background_tasks: Backg
             )
         
         if mode == "video":
+            from app.search.visual_search import warmup_clip_model
             background_tasks.add_task(warmup_clip_model)
 
         return {
@@ -449,6 +477,8 @@ def search_visual(payload: SearchVisualRequest):
             video_details.get("pinecone_namespace")
             or payload.job_id
         )
+
+        from app.search.visual_search import search_visual_scenes_backend
 
         result = search_visual_scenes_backend(
             job_id=payload.job_id,

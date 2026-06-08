@@ -532,7 +532,7 @@ def start_youtube_processing(payload: ProcessYouTubeRequest):
     update_parent_job(
         job_id=payload.job_id,
         status="queued",
-        progress=5,
+        progress=15,
         message="Audio processing job submitted to Modal.",
         error="",
     )
