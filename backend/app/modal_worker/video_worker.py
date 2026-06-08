@@ -588,7 +588,7 @@ def process_video_background(
         update_parent_job(
             job_id=job_id,
             status="processing",
-            progress=10,
+            progress=20,
             message="Modal started video processing.",
             error="",
         )

@@ -364,7 +364,7 @@ def process_youtube_video_background(
         update_parent_job(
             job_id=job_id,
             status="processing",
-            progress=10,
+            progress=20,
             message="Audio worker started.",
             error="",
         )

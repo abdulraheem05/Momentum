@@ -25,7 +25,7 @@ def create_upload_job(
         "youtube_id": None,
         "mode": mode,
         "status": "queued",
-        "progress": 5,
+        "progress": 15,
         "message": "File uploaded. Preparing processing.",
         "error": "",
         "original_file_name": original_file_name,
