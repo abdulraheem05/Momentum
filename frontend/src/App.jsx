@@ -214,6 +214,10 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploadingFile, setIsUploadingFile] = useState(false); 
   const [isDraggingFile, setIsDraggingFile] = useState(false); 
+  const [showSplash, setShowSplash] = useState(true);
+
+  const [splashExiting, setSplashExiting] = useState(false);
+  const [appReady, setAppReady] = useState(false);
 
   const pollRef = useRef(null);
   const modePickerRef = useRef(null);
@@ -274,6 +278,22 @@ export default function App() {
 
     return () => clearTimeout(timeout);
   }, [youtubeUrl]);
+
+  useEffect(() => {
+    const exitTimer = setTimeout(() => {
+      setSplashExiting(true);
+      setAppReady(true);
+    }, 2600);
+
+    const removeTimer = setTimeout(() => {
+      setShowSplash(false);
+    }, 3300);
+
+    return () => {
+      clearTimeout(exitTimer);
+      clearTimeout(removeTimer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!job?.message && !job?.status) return;
@@ -676,9 +696,35 @@ export default function App() {
   };
 
   return (
+    <>
+    {showSplash && (
+      <div className={cx("splash-screen", splashExiting && "exiting")}>
+        <video
+          className="splash-video"
+          src="/MomentumSplashh.mp4"
+          autoPlay
+          muted
+          playsInline
+          preload="auto"
+          onEnded={() => {
+            setSplashExiting(true);
+            setAppReady(true);
+
+            setTimeout(() => {
+              setShowSplash(false);
+            }, 700);
+          }}
+        />
+
+        <div className="splash-glow" />
+      </div>
+    )}
+
+    
     <div
       className={cx(
         "momentum-app",
+        appReady && "app-ready",
         hasStarted && "conversation-mode",
         modeMenuOpen && !hasStarted && "mode-menu-open"
       )}
@@ -686,7 +732,7 @@ export default function App() {
       <main className="momentum-shell">
         <section className="intro-panel">
           <div className="brand-center">
-            <h1>Momentum</h1>
+            <img src="/Momentum Full logo.png-2.png" alt="" />
             <p>
               {sourceType === "youtube"
                 ? "Search any YouTube video by what you see or what you hear."
@@ -1165,5 +1211,6 @@ export default function App() {
         Momentum can make mistakes. Demo mode currently processes on CPU, so longer videos may take more time than production GPU processing.
       </footer>
     </div>
+    </>
   );
 }
