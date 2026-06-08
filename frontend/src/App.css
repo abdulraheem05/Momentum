@@ -1559,7 +1559,9 @@ button {
     padding: 12px;
     border-radius: 24px;
     background: #ffffff;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
+    z-index: 50;
   }
 
   .composer-input-row input {
@@ -1608,7 +1610,9 @@ button {
   .mode-dropdown {
     grid-area: mode;
     justify-self: start;
-    width: auto;
+    min-width: 0;
+    position: relative;
+    z-index: 1000;
   }
 
   .mode-trigger {
@@ -1638,6 +1642,7 @@ button {
     width: min(88vw, 330px);
     left: 0;
     top: calc(100% + 14px);
+    z-index: 10000;
   }
 
   .error-message {
