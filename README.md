@@ -42,9 +42,7 @@ Instead of manually scrubbing through the timeline, users can:
 
 Search videos visually using natural language.
 
-Example:
-(./screenshots/youtube-search.png)
-
+<img src="./frontend/screenshots/momentum-sample.png" alt="Scene Search Results" width="850">
 
 How it works:
 
@@ -58,8 +56,7 @@ Video → Scene/frame sampling → CLIP embeddings → Pinecone → Text query s
 
 Search videos using remembered spoken words.
 
-Example:
-(./screenshots/youtube-search.png)
+<img src="./frontend/screenshots/momentum-sample-2.png" alt="Scene Search Results" width="850">
 
 How it works:
 
@@ -131,7 +128,7 @@ flowchart TD
 * Pinecone namespaces per video/job for isolated vector search
 * Cleanup logic for uploaded files and Pinecone vectors when starting a new search
 * Backend CLIP warmup to reduce first-search latency
-* Separate YouTube and local file pipelines
+* Separate YouTube and Local file pipelines
 * CPU-compatible demo setup with GPU-ready worker architecture
 
 ---
