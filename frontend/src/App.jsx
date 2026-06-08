@@ -701,7 +701,7 @@ export default function App() {
       <div className={cx("splash-screen", splashExiting && "exiting")}>
         <video
           className="splash-video"
-          src="/MomentumSplashh.mp4"
+          src="/Momentum_Splash_Screen.mp4"
           autoPlay
           muted
           playsInline
