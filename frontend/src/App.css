@@ -343,7 +343,7 @@ button {
   color: #be123c;
   animation: previewIn 260ms ease both;
   position: relative;
-  z-index: 999;
+  z-index: 20;
 }
 
 .error-message strong {
@@ -1454,5 +1454,158 @@ button {
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+
+@media (max-width: 720px) {
+  .momentum-shell,
+  .demo-note {
+    width: min(100% - 28px, 980px);
+  }
+
+  .intro-panel {
+    justify-content: center;
+    min-height: 100svh;
+    padding-top: 86px;
+    padding-bottom: 40px;
+  }
+
+  .brand-center img {
+    width: min(78vw, 360px);
+    height: auto;
+    display: block;
+    margin: 0 auto;
+  }
+
+  .brand-center p {
+    width: min(92vw, 380px);
+    margin: 22px auto 0;
+    text-align: center;
+    font-size: 18px;
+    line-height: 1.45;
+    color: #64748b;
+  }
+
+  .source-switcher {
+    width: min(88vw, 330px);
+    height: 54px;
+    margin-top: 34px;
+  }
+
+  .source-switcher button {
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  .gemini-composer {
+    width: min(90vw, 430px);
+    margin-top: 44px;
+    padding: 12px;
+    border-radius: 30px;
+  }
+
+  .composer-input-row {
+    min-height: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "input input"
+      "mode send";
+    gap: 14px;
+    padding: 12px;
+    border-radius: 24px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .composer-input-row input {
+    grid-area: input;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    min-height: 48px;
+    padding: 0 8px;
+    font-size: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .composer-input-row input::placeholder {
+    font-size: 18px;
+    color: #94a3b8;
+  }
+
+  .instant-preview {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .instant-preview div {
+    min-width: 0;
+  }
+
+  .instant-preview strong,
+  .instant-preview span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .instant-preview img {
+    width: 82px;
+    height: 48px;
+    flex: 0 0 auto;
+  }
+
+  .mode-picker,
+  .mode-dropdown {
+    grid-area: mode;
+    justify-self: start;
+    width: auto;
+  }
+
+  .mode-trigger {
+    height: 50px;
+    min-width: 190px;
+    padding: 0 18px;
+    font-size: 17px;
+    gap: 10px;
+  }
+
+  .mode-icon-slot img {
+    width: 22px;
+    height: 22px;
+  }
+
+  .send-button {
+    grid-area: send;
+    justify-self: end;
+    width: 52px;
+    height: 52px;
+    margin-left: 0;
+    font-size: 22px;
+    order: initial;
+  }
+
+  .mode-menu {
+    width: min(88vw, 330px);
+    left: 0;
+    top: calc(100% + 14px);
+  }
+
+  .error-message {
+    width: min(94vw, 430px);
+    margin-top: 16px;
+    border-radius: 22px;
+  }
+
+  .demo-note {
+    padding-top: 28px;
+    font-size: 12px;
+    line-height: 1.5;
   }
 }

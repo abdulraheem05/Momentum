@@ -222,6 +222,7 @@ export default function App() {
   const pollRef = useRef(null);
   const modePickerRef = useRef(null);
   const uploadModeRowRef = useRef(null);
+  const youtubeInputRef = useRef(null);
 
   const activeUrl = submittedUrl || youtubeUrl;
   const youtubeId = useMemo(() => getYouTubeId(activeUrl), [activeUrl]);
@@ -428,6 +429,7 @@ export default function App() {
 
     if (!cleanUrl) {
       setError("Paste a YouTube URL first.");
+      setModeMenuOpen(false);
       return;
     }
 
@@ -473,6 +475,7 @@ export default function App() {
 
       pollJob(response.data.job_id, "youtube");
     } catch (err) {
+      setModeMenuOpen(false);
       setError(
         err?.response?.data?.detail ||
           "Could not start processing. Check your backend URL, Modal endpoint, and environment variables."
@@ -769,16 +772,25 @@ export default function App() {
             <>
               <div className="composer-input-row">
                 <input
+                  ref={youtubeInputRef}
                   value={youtubeUrl}
                   onChange={(e) => setYoutubeUrl(e.target.value)}
                   placeholder="Paste a YouTube URL"
                   disabled={isCreatingJob || (!!jobId && !isFailed)}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      youtubeInputRef.current?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                      });
+                    }, 300);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") startProcessing();
                   }}
                 />
 
-                <label className={cx("mode-dropdown", mode)}>
+                <div className={cx("mode-dropdown", mode)}>
                   <div className="mode-picker" ref={modePickerRef}>
                     <button
                       type="button"
@@ -808,7 +820,9 @@ export default function App() {
                               key={item.id}
                               type="button"
                               className={selected ? "mode-menu-item selected" : "mode-menu-item"}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
                                 setMode(item.id);
                                 setModeMenuOpen(false);
                               }}
@@ -834,7 +848,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                </label>
+                </div>
 
                 <button
                   className="send-button"
@@ -952,7 +966,9 @@ export default function App() {
                             key={item.id}
                             type="button"
                             className={selected ? "mode-menu-item selected" : "mode-menu-item"}
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
                               setMode(item.id);
                               setModeMenuOpen(false);
                             }}
