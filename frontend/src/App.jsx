@@ -32,6 +32,8 @@ const SEARCH_MODES = [
   },
 ];
 
+const MAX_UPLOAD_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
+
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
@@ -488,6 +490,16 @@ export default function App() {
   const startUploadProcessing = async (file) => {
   if (!file) return;
 
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    setError("File is too large. Maximum local file upload size is 2 GB.");
+    setSelectedFile(null);
+    setUploadProgress(0);
+    setIsUploadingFile(false);
+    setIsCreatingJob(false);
+    setModeMenuOpen(false);
+    return;
+  }
+
   try {
     const startedAt = Date.now();
 
@@ -661,19 +673,30 @@ export default function App() {
     }
   };
 
-  const cleanupUploadedFile = async () => {
-    if (sourceType !== "upload") return;
+  const cleanupJobArtifacts = async () => {
     if (!jobId) return;
 
-    try {
-      await axios.delete(`${API}/upload/jobs/${jobId}/file`);
-    } catch (err) {
-      console.warn("Could not delete uploaded Azure file:", err);
+    // Delete Pinecone vectors for video jobs
+    if (mode === "video") {
+      try {
+        await axios.delete(`${API}/jobs/${jobId}/vectors`);
+      } catch (err) {
+        console.warn("Could not delete Pinecone vectors:", err);
+      }
+    }
+
+    // Delete uploaded Azure media file only for local uploads
+    if (sourceType === "upload") {
+      try {
+        await axios.delete(`${API}/upload/jobs/${jobId}/file`);
+      } catch (err) {
+        console.warn("Could not delete uploaded Azure file:", err);
+      }
     }
   };
 
   const resetWorkspace = async () => {
-    await cleanupUploadedFile();
+    await cleanupJobArtifacts();
 
     stopPolling();
     setMode("video");
@@ -926,11 +949,11 @@ export default function App() {
                 </div>
 
                 <strong>
-                  {selectedFile ? selectedFile.name : "Drop your file here, or browse"}
+                  {selectedFile ? selectedFile.name : "Drag and drop your file here, or browse"}
                 </strong>
 
                 <small>
-                  Supports MP4, MOV, WEBM, MP3, WAV
+                  Supports MP4, MOV, WEBM, MP3, WAV · Max 2 GB
                 </small>
               </label>
 
