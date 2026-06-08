@@ -1,178 +1,175 @@
 # 🎬 Momentum
-### Audio Search + Scene Search (FastAPI • React • CLIP • FAISS • Whisper)
 
-[![Python](https://img.shields.io/badge/Python-3.10-blue.svg)]()
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)]()
 [![React](https://img.shields.io/badge/React-Frontend-61DAFB.svg)]()
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.6+-EE4C2C.svg)]()
-[![Docker](https://img.shields.io/badge/Docker-Supported-2496ED.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+[![Modal](https://img.shields.io/badge/Modal-Workers-111827.svg)]()
+[![Azure](https://img.shields.io/badge/Azure-Blob%20Storage-0078D4.svg)]()
+[![Pinecone](https://img.shields.io/badge/Pinecone-Vector%20Search-22C55E.svg)]()
+[![CLIP](https://img.shields.io/badge/CLIP-Scene%20Search-8B5CF6.svg)]()
+[![Groq](https://img.shields.io/badge/Groq-Whisper%20Transcription-F97316.svg)]()
+[![Vercel](https://img.shields.io/badge/Vercel-Frontend%20Deploy-000000.svg)]()
+[![HuggingFace](https://img.shields.io/badge/Hugging%20Face-Backend%20Deploy-FFD21E.svg)]()
 
-> Find the exact moment inside a video using **dialogue memory** (speech-to-text) or **scene description** (visual semantic search).
+**Find the exact moment inside a YouTube video or Local file using visual scene description or dialogue memory**
+<br>
+<br>
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Try%20Momentum-111827?style=for-the-badge&logo=vercel&logoColor=white)](https://momentum-seven-pearl.vercel.app)
+
+🔗 [https://momentum-seven-pearl.vercel.app](https://momentum-seven-pearl.vercel.app)
 
 ---
 
 ## 🚀 Overview
 
-**Momentum** is a full-stack AI-powered video search system. It allows users to locate specific moments within a video using two independent, high-performance pipelines.
+Momentum solves a simple problem:
 
-### 🔊 1. Audio Search (Dialogue-Based)
-- **Transcription:** Uses **Whisper** to convert speech (English/Tamil) into time-stamped text.
-- **Search:** Search the transcript using remembered dialogue.
-- **Output:** Returns the exact timestamp and a generated **10-second video clip** of the moment.
+> Finding a specific moment inside a long video is slow when you only remember a scene or a line of dialogue.
 
-### 🖼 2. Scene Search (Visual Semantic Search)
-- **Indexing:** Samples frames every 3 seconds and generates **CLIP** embeddings.
-- **Vector Search:** Uses **FAISS** for rapid similarity matching.
-- **Output:** Search using natural language descriptions (e.g., "a person walking on the beach") to get the best matching timestamp and clip.
+Instead of manually scrubbing through the timeline, users can:
+
+* Paste a **YouTube URL** or upload a **Local file**
+* Choose **Scene Search** or **Dialogue Search**
+* Process the video asynchronously
+* Search using natural language
+* Get the top matching timestamps
 
 ---
 
-## 🏗 Architecture
+## Features
+
+### 🖼 Scene Search
+
+Search videos visually using natural language.
+
+Example:
+(./screenshots/youtube-search.png)
 
 
+How it works:
 
 ```text
-React Frontend (UI)
-        ↓
-FastAPI Backend (Orchestrator)
-        ↓
-┌───────────────────────────────┐      ┌───────────────────────────────┐
-│        Audio Pipeline         │      │        Scene Pipeline         │
-│ FFmpeg → Whisper → Search     │      │ Frames → CLIP → FAISS Search  │
-└───────────────────────────────┘      └───────────────────────────────┘
-                │                                      │
-                └───────▶ 10s Clip Generator ◀─────────┘
-                          (via FFmpeg)
-
+Video → Scene/frame sampling → CLIP embeddings → Pinecone → Text query search
 ```
 
 ---
 
-## 🛠 Tech Stack
+### 🔊 Dialogue Search
 
-### Backend
+Search videos using remembered spoken words.
 
-* **FastAPI:** High-performance web framework.
-* **SQLite:** Job and metadata tracking.
-* **FFmpeg:** Audio extraction and dynamic video clipping.
-* **AI Models:** `faster-whisper` (Speech), `Transformers/CLIP` (Vision).
-* **Vector DB:** **FAISS** (Facebook AI Similarity Search).
-* **PyTorch:** Backend engine for model inference (CPU/CUDA).
+Example:
+(./screenshots/youtube-search.png)
 
-### Frontend
-
-* **React + Vite:** Modern, fast frontend build tool.
-* **Axios:** API communication.
-* **HTML5 Video Player:** Native streaming support.
-
----
-
-<<<<<<< HEAD
-## Prerequisites (Local Run)
-
-### Required
-- **Python 3.10.x**
-- **Node 18+**
-- **FFmpeg installed and available in PATH**
-  - Check: `ffmpeg -version`
-
-### Optional (GPU)
-- NVIDIA GPU + drivers (for faster scene/audio)
-- Torch CUDA build (installed via GPU requirements)
-
----
-
-## Running locally (Windows)
-
-### 1) Backend (CPU)
-```powershell
-=======
-## ⚙️ Local Setup (Windows)
-
-### 📦 Requirements
-
-* Python 3.10.x
-* Node 18+
-* **FFmpeg** installed and added to your system `PATH`.
-
-### ▶ Backend Setup
-
-```bash
->>>>>>> 9fcb3f88aff410770fdd1edaf0324a08c29647ea
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Upgrade pip and install requirements
-python -m pip install --upgrade pip setuptools wheel
-
-# FOR CPU:
-pip install --no-cache-dir -r requirements\cpu.txt
-
-# FOR GPU (Optional - CUDA 12.4):
-pip install --no-cache-dir -r requirements\gpu-cu124.txt
-
-# Start the server
-python run.py
-
-### 2) 
-```
-
-### 💻 Frontend Setup 
-
-```bash
-cd frontend
-npm install
-npm run dev
-
-```
-
-* **Frontend:** `http://localhost:5173`
-* **API Docs:** `http://localhost:8000/docs`
-
----
-
-## 🐳 Docker Setup
-
-### CPU Version (Recommended for testing)
-
-```bash
-docker compose up --build
-
-```
-
-### GPU Version (Requires NVIDIA Docker runtime)
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
-
-```
-
----
-
-## 📁 Runtime Data Structure
-
-*Note: These folders are created automatically and are ignored by `.gitignore`.*
+How it works:
 
 ```text
-backend/data/
-  ├── uploads/        # Original video files
-  ├── audio/          # Extracted audio tracks
-  ├── transcriptions/ # JSON segment data
-  ├── index/          # FAISS vector indices
-  ├── clips/          # Generated 10s result segments
-  └── app.db          # Job tracking database
-
+Video/audio → Transcription → Timestamped JSON → Dialogue search
 ```
 
 ---
 
-## 🛠 Troubleshooting
+### Main components
 
-* **CUDA/cuDNN Error:** If on Windows, always start the backend via `python run.py`. It contains a custom patch to fix NVIDIA DLL pathing issues.
-* **405 Method Not Allowed:** Double-check your URL in the frontend or use the Swagger UI (`/docs`) to verify the route.
-* **FFmpeg Not Found:** Run `ffmpeg -version` in your terminal. If it fails, you must install FFmpeg and add the `bin` folder to your Environment Variables.
-* **206 Partial Content:** This is expected! It means the server is successfully streaming video chunks to your browser.
+| Component           | Purpose                         |
+| ------------------- | ------------------------------- |
+| React + Vite        | Frontend UI                     |
+| FastAPI             | API and orchestration           |
+| Postgres / Supabase | Job status and metadata         |
+| Modal               | Heavy audio/video processing    |
+| Azure Blob Storage  | Media files and transcript JSON |
+| Pinecone            | Scene vector storage and search |
+| CLIP                | Visual embedding model          |
+| Groq Whisper        | Speech transcription            |
 
 ---
+
+<br>
+
+<h2 align="center">
+  🔄 Processing Flow
+</h2>
+
+<p align="center">
+  <strong>How Momentum processes YouTube videos and Local files asynchronously</strong>
+</p>
+
+<br>
+
+```mermaid
+flowchart TD
+    A[User chooses source] --> B{YouTube or Local File?}
+
+    B -->|YouTube URL| C[FastAPI creates job]
+    C --> D[Modal downloads video]
+    D --> E{Selected mode?}
+
+    B -->|Local file| F[FastAPI generates Azure SAS URL]
+    F --> G[Browser uploads directly to Azure Blob]
+    G --> H[FastAPI creates processing job]
+    H --> E
+
+    E -->|Dialogue Search| I[Extract audio + transcribe with Groq Whisper]
+    I --> J[Store timestamped transcript JSON in Azure Blob]
+
+    E -->|Scene Search| K[Sample frames / scenes]
+    K --> L[Generate CLIP embeddings]
+    L --> M[Store vectors in Pinecone namespace]
+
+    J --> N[Frontend polls until job is ready]
+    M --> N
+
+    N --> O[User searches]
+    O --> P[FastAPI searches transcript or Pinecone]
+    P --> Q[Return best matching timestamps]
+```
+
+## ⚙️ Engineering Highlights
+
+* Asynchronous job-based processing for long-running video tasks
+* Direct-to-Azure upload using SAS URLs to avoid routing large files through FastAPI
+* Pinecone namespaces per video/job for isolated vector search
+* Cleanup logic for uploaded files and Pinecone vectors when starting a new search
+* Backend CLIP warmup to reduce first-search latency
+* Separate YouTube and local file pipelines
+* CPU-compatible demo setup with GPU-ready worker architecture
+
+---
+
+## ⚡ CPU vs GPU Processing
+
+The current demo runs on **sequential CPU processing** to keep deployment simple and avoid unnecessary GPU credit usage during public demos.
+
+For production usage, the architecture is already designed to support **Modal GPU workers** and parallel video processing. In that setup, a longer video can be split into smaller chunks, processed across multiple GPU workers, and then merged back into a single searchable index.
+
+```text
+Long video
+   ↓
+Split into chunks
+   ↓
+Parallel Modal GPU workers
+   ↓
+CLIP embeddings per chunk
+   ↓
+Merged into one Pinecone namespace
+```
+
+## 📌 Limitations
+
+* Local upload speed depends on user network
+* Demo mode may be slower for longer videos when using CPU workers (mainly for Local files)
+* Dialogue search is currently best suited for English transcripts
+
+---
+
+## 🧠 What this project demonstrates
+
+Momentum demonstrates practical experience in:
+
+* Full-stack AI application development
+* Cloud orchestration across multiple services
+* Asynchronous job processing
+* Vector search architecture
+* Video/audio processing pipelines
+* Real-time progress-based frontend UX
+* Production-style separation of frontend, backend, compute, storage, and vector database
