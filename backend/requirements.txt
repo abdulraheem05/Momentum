@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+python-multipart
+requests
+supabase
+azure-storage-blob
+pinecone
+numpy
+torch
+transformers
+pydantic
+pydantic-settings
+groq
+opencv-python-headless
