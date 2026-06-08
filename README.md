@@ -1,4 +1,7 @@
-# 🎬 Momentum
+<h1>
+  <img src="./frontend/public/Momentum Whitepng.png" alt="Momentum Logo" width="48" align="center">
+  Momentum
+</h1>
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)]()
