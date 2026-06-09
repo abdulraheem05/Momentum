@@ -50,8 +50,12 @@ Search videos visually using natural language.
 How it works:
 
 ```text
-Video → Scene/frame sampling → CLIP embeddings → Pinecone → Text query search
+Video → PySceneDetect scene detection → Key frame extraction → CLIP embeddings → Pinecone → Text query search
 ```
+
+ⓘ Note
+
+**PySceneDetect** is a Python video-processing library that detects scene changes, allowing Momentum to extract meaningful frames instead of sampling randomly.
 
 ---
 
@@ -64,7 +68,7 @@ Search videos using remembered spoken words.
 How it works:
 
 ```text
-Video/audio → Transcription → Timestamped JSON → Dialogue search
+Video/audio → Transcription by Groq → Timestamped JSON → Dialogue search
 ```
 
 ---
@@ -138,9 +142,9 @@ flowchart TD
 
 ## ⚡ CPU vs GPU Processing
 
-The current demo runs on **sequential CPU processing** to keep deployment simple and avoid unnecessary GPU credit usage during public demos.
+The current MVP processes video embeddings sequentially on CPU to keep the public demo lightweight and cost-efficient. Searching very long YouTube videos, such as a 3-hour movie, can therefore take around 15 minutes because CLIP embedding generation is computationally heavy.
 
-For production usage, the architecture is already designed to support **Modal GPU workers** and parallel video processing. In that setup, a longer video can be split into smaller chunks, processed across multiple GPU workers, and then merged back into a single searchable index.
+For production-scale usage, the architecture is already designed to support the same pipeline by splitting long videos into smaller chunks and processing them in parallel across multiple Modal GPU workers. This would significantly reduce the processing workload and can improve indexing speed by around 60%.
 
 ```text
 Long video
@@ -173,3 +177,9 @@ Momentum demonstrates practical experience in:
 * Video/audio processing pipelines
 * Real-time progress-based frontend UX
 * Production-style separation of frontend, backend, compute, storage, and vector database
+
+---
+ⓘ Note
+
+This MVP is mainly built to validate the architecture, orchestration flow, and end-to-end search pipeline. The speed should be optimized by deploying the GPU Modal worker file which is already developed. 
+
