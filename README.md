@@ -1,7 +1,8 @@
-<h1>
-  <img src="./frontend/public/Momentum Whitepng.png" alt="Momentum Logo" width="48" align="center">
-  Momentum
-</h1>
+<div align="center">
+  <h1>
+    <img src="./frontend/public/Momentum Whitepng.png" alt="Momentum Logo" width="48" align="center">
+    Momentum
+  </h1>
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)]()
@@ -20,6 +21,7 @@
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Try%20Momentum-111827?style=for-the-badge&logo=vercel&logoColor=white)](https://momentum-seven-pearl.vercel.app)
 
 🔗 [https://momentum-seven-pearl.vercel.app](https://momentum-seven-pearl.vercel.app)
+</div>
 
 ---
 
@@ -179,7 +181,20 @@ Momentum demonstrates practical experience in:
 * Production-style separation of frontend, backend, compute, storage, and vector database
 
 ---
+
 ⓘ Note
 
 This MVP is mainly built to validate the architecture, orchestration flow, and end-to-end search pipeline. The speed should be optimized by deploying the GPU Modal worker file which is already developed. 
 
+---
+
+<div align="center">
+  <h2>Contact Me</h2>
+  <p>Have inquiries or feedback? Feel free to reach out!</p>
+  
+  <a href="https://mail.google.com/mail/?view=cm&fs=1&to=abdlraheem26@gmail.com&su=Inquiry%20regarding%20WhatsAgent" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/badge/Email-abdlraheem26%40gmail.com-005bb5?style=for-the-badge&logo=gmail&logoColor=white" alt="Email Abdul Raheem" />
+  </a>
+</div>
+
+---
